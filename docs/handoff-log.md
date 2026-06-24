@@ -191,14 +191,24 @@ host" constraint inherited from `runner-foundation-v0` stands. Sandbox
 hardening remains deferred to `change/runner-sandbox` (requires human review).
 
 **Archive + spec sync:**
-- `openspec archive domain-model-migrations -y` synced the delta spec into
-  `openspec/specs/domain-model/spec.md` (9 requirements created) and moved the
-  change folder to `openspec/changes/archive/2026-06-24-domain-model-migrations/`.
-- Replaced the `TBD` Purpose placeholder with a real Purpose tying the spec to
-  R1 (ai_status/operator_status split), R3 (evidence vs probe_flags structural
-  separation), and R4 (operator_persona hidden, not in evidence).
-- `openspec validate domain-model --specs` → ✓ passes.
+- Ran `openspec archive domain-model-migrations -y`. This did TWO things in one
+  authoritative step: (1) **synced** the delta spec into the canonical spec at
+  `openspec/specs/domain-model/spec.md` (created it — `domain-model: create`,
+  9 requirements added), and (2) **archived** the change folder to
+  `openspec/changes/archive/2026-06-24-domain-model-migrations/`.
+  - Note for next session (already known from Step 1 closeout, confirmed again):
+    archiving is NOT a verbatim file move. The delta uses `## ADDED Requirements`
+    headers; the CLI transforms it into the canonical `## Purpose` +
+    `## Requirements` shape. Don't hand-write canonical specs — let
+    `openspec archive` (or `openspec-sync-specs`) do it.
+- `openspec archive` leaves the Purpose as a `TBD` placeholder. Replaced it with
+  a real Purpose tying the spec to R1 (ai_status/operator_status split +
+  `finalVerdict()` guard), R3 (evidence vs probe_flags structural separation),
+  and R4 (operator_persona hidden, not in evidence). `openspec validate
+  domain-model --specs` → ✓ passes.
 - Committed and pushed to `main` at `d9cea34`.
+- Feature branch `feat/change-b-domain-model` deleted both locally and on
+  `origin` after merge.
 - `openspec/changes/` active folder holds only `archive/`. No active changes.
 - Canonical specs on `main`: `domain-model` (9 requirements) +
   `runner-cli` (8 requirements).
