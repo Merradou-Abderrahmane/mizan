@@ -1,7 +1,12 @@
 # runner-cli Specification
 
 ## Purpose
-TBD - created by archiving change runner-foundation-v0. Update Purpose after archive.
+The runner CLI is Mizan's deterministic, stack-specific structural-check worker:
+it takes the path to a cloned student repo, runs a fixed set of PHP/Laravel
+checks, and emits an evidence-backed JSON report on stdout. Per Hard Rule R2 it
+stays dumb and constant — the checks do not vary per brief — and per R1 it emits
+only evidence, never a grading verdict.
+
 ## Requirements
 ### Requirement: Runner CLI entry contract
 The runner SHALL be a PHP CLI at `apps/runner/bin/runner` that takes exactly one
