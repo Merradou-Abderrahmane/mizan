@@ -143,3 +143,63 @@ divergence + regression). Touches R1, R3, R4. Sandbox impact: none.
 > merged to `main` at `da3568f`). Branch off `main` and propose
 > `Change B — Domain model & migrations` via `openspec-propose`, continuing the
 > propose → apply → archive loop. Hard rules and the v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-24 — Step 2: domain-model-migrations (Change B)
+
+**Change name:** `domain-model-migrations`
+**OpenSpec change folder:** `openspec/changes/domain-model-migrations/`
+**Branch:** `feat/change-b-domain-model` (PR against `main` — NOT merged by the
+session; operator reviews and merges).
+
+**What happened:**
+- Proposed via `openspec-propose` skill: proposal, design, specs/domain-model,
+  tasks — all 4 artifacts, `openspec validate` green.
+- Implemented via `openspec-apply-change` skill on branch
+  `feat/change-b-domain-model` (never on `main`).
+- 8 new migration files creating 9 domain tables: `referentiels`, `levels`,
+  `competences`, `briefs`, `student_repos`, `runs`, `evidence`, `drafts`,
+  `probe_flags`.
+- 9 new Eloquent models with typed relations.
+- 9 new model factories.
+- 1 new test class `tests/Feature/DomainSchemaTest.php` — 20 tests covering
+  relations + hard-rule guarantees at the schema/model layer.
+
+**Hard rules enforced in the schema itself (not just app logic):**
+- **R1** — `drafts.ai_status` has DB-level `DEFAULT 'à vérifier'`; separate
+  nullable `operator_status` + `finalized_at`; `Draft::finalVerdict()`
+  returns null until finalized. Tests assert all three.
+- **R3** — `evidence` (Pass 1, blind, file+line, no `student_repo_id`) is a
+  separate table from `probe_flags` (Pass 2, `kind`+`context_payload`, no
+  `file_path`/`line_number`). Tests assert the structural separation.
+- **R4** — `student_repos.operator_persona` is `$hidden` on the model;
+  `evidence` has no persona column and no FK to `student_repos`. Tests assert
+  serialization omits persona and the evidence table lacks the column.
+
+**Test results at handoff:**
+```
+php artisan test
+Tests: 21 passed (41 assertions)
+```
+All green on both `php artisan migrate` and `php artisan migrate:fresh`
+(idempotent from a clean schema).
+
+**Sandbox/security boundary:** NOT touched. No `apps/runner` changes, no
+Docker, no egress, no secrets. The v0 "trusted repos only on local Laragon
+host" constraint inherited from `runner-foundation-v0` stands. Sandbox
+hardening remains deferred to `change/runner-sandbox` (requires human review).
+
+**Next planned step:** Archive `domain-model-migrations` after the operator
+merges the PR (use `openspec archive` per the propose → apply → archive loop),
+then proceed to the next change in the 2026-06-24 sequencing (likely the LLM
+Pass 1 wiring or the web UI for run orchestration).
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `domain-model-migrations`
+> is implemented on `feat/change-b-domain-model` with a PR open against `main`
+> (21/21 tests green, R1/R3/R4 enforced in schema). The operator reviews and
+> merges. After merge, archive the change and proceed to the next change
+> (LLM Pass 1 wiring or web UI orchestration). Hard rules and the v0
+> sandbox-deferral stand.
