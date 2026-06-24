@@ -1,0 +1,26 @@
+{
+    "name": "mizan/runner",
+    "description": "Mizan autograder runner — deterministic structural checks for PHP/Laravel student repos. CLI in, JSON out.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "symfony/process": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mizan\\Runner\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Mizan\\Runner\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/runner"
+    ]
+}
