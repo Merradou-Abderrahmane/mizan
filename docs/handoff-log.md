@@ -149,9 +149,9 @@ divergence + regression). Touches R1, R3, R4. Sandbox impact: none.
 ## 2026-06-24 — Step 2: domain-model-migrations (Change B)
 
 **Change name:** `domain-model-migrations`
-**OpenSpec change folder:** `openspec/changes/domain-model-migrations/`
-**Branch:** `feat/change-b-domain-model` (PR against `main` — NOT merged by the
-session; operator reviews and merges).
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-24-domain-model-migrations/`
+**Branch:** `feat/change-b-domain-model` — merged to `main` via PR #4 at
+`21a4336`, then archived + spec synced at `d9cea34`.
 
 **What happened:**
 - Proposed via `openspec-propose` skill: proposal, design, specs/domain-model,
@@ -190,16 +190,38 @@ Docker, no egress, no secrets. The v0 "trusted repos only on local Laragon
 host" constraint inherited from `runner-foundation-v0` stands. Sandbox
 hardening remains deferred to `change/runner-sandbox` (requires human review).
 
-**Next planned step:** Archive `domain-model-migrations` after the operator
-merges the PR (use `openspec archive` per the propose → apply → archive loop),
-then proceed to the next change in the 2026-06-24 sequencing (likely the LLM
-Pass 1 wiring or the web UI for run orchestration).
+**Archive + spec sync:**
+- `openspec archive domain-model-migrations -y` synced the delta spec into
+  `openspec/specs/domain-model/spec.md` (9 requirements created) and moved the
+  change folder to `openspec/changes/archive/2026-06-24-domain-model-migrations/`.
+- Replaced the `TBD` Purpose placeholder with a real Purpose tying the spec to
+  R1 (ai_status/operator_status split), R3 (evidence vs probe_flags structural
+  separation), and R4 (operator_persona hidden, not in evidence).
+- `openspec validate domain-model --specs` → ✓ passes.
+- Committed and pushed to `main` at `d9cea34`.
+- `openspec/changes/` active folder holds only `archive/`. No active changes.
+- Canonical specs on `main`: `domain-model` (9 requirements) +
+  `runner-cli` (8 requirements).
+
+**State at handoff:**
+- On `main`, clean, in sync with `origin/main` at `d9cea34`.
+- `domain-model-migrations` is DONE: applied, merged (PR #4 at `21a4336`),
+  archived, spec promoted, closeout pushed (`d9cea34`).
+
+**Next planned step:**
+Per the 2026-06-24 sequencing, the next change is likely the LLM Pass 1 wiring
+or the web UI for run orchestration (operator can create a Run from a Brief +
+StudentRepo, invoke the runner CLI, store evidence). Start fresh from `main`
+with a new feature branch + `openspec-propose`, continuing the propose → apply
+→ archive loop with the real branch + PR gate (as done for Change B).
 
 **One-liner to resume:**
 
-> Read `openspec/config.yaml` and `docs/handoff-log.md`. `domain-model-migrations`
-> is implemented on `feat/change-b-domain-model` with a PR open against `main`
-> (21/21 tests green, R1/R3/R4 enforced in schema). The operator reviews and
-> merges. After merge, archive the change and proceed to the next change
-> (LLM Pass 1 wiring or web UI orchestration). Hard rules and the v0
-> sandbox-deferral stand.
+> Read `openspec/config.yaml` and `docs/handoff-log.md`.
+> `domain-model-migrations` is fully done (applied, merged via PR #4 at
+> `21a4336`, archived at `2026-06-24-domain-model-migrations`, spec promoted
+> to `openspec/specs/domain-model`, closeout pushed to `main` at `d9cea34`).
+> 21/21 tests green, R1/R3/R4 enforced in schema. Branch off `main` and
+> propose the next change (LLM Pass 1 wiring or web UI run orchestration) via
+> `openspec-propose`, continuing the propose → apply → archive loop with the
+> branch + PR gate. Hard rules and the v0 sandbox-deferral stand.
