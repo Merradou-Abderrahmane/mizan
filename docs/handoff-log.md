@@ -235,3 +235,80 @@ with a new feature branch + `openspec-propose`, continuing the propose → apply
 > propose the next change (LLM Pass 1 wiring or web UI run orchestration) via
 > `openspec-propose`, continuing the propose → apply → archive loop with the
 > branch + PR gate. Hard rules and the v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-24 — Step 3: repo-intake (Change C)
+
+**Change name:** `repo-intake`
+**OpenSpec change folder:** `openspec/changes/repo-intake/`
+**Branch:** `feat/change-c-repo-intake` — PR against `main` (NOT merged by the
+session; operator reviews and merges).
+
+**What happened:**
+- Proposed via `openspec-propose` skill: proposal, design, specs/repo-intake,
+  tasks — all 4 artifacts, `openspec validate` green.
+- **Operator push-back on the original proposal:** the original proposal
+  suggested making `evidence.competence_id` nullable (MODIFY to `domain-model`)
+  so runner structural checks could be persisted as `Evidence` rows. The
+  operator pushed back: runner checks are input artifacts, not per-competence
+  R3 findings; they're already fully captured in `runner_report_json` on the
+  `Run`. A nullable `competence_id` would overload the `evidence` table with
+  two semantic kinds and require downstream null-guards.
+- **Decision (Option X):** Revised the proposal to DROP the `domain-model`
+  modification entirely. The service persists the `Run` with
+  `runner_report_json` and creates ZERO `Evidence` rows. The `evidence` table
+  stays strictly per-competence (`competence_id` non-nullable, FK RESTRICT)
+  exactly as Change B designed it. A separate `check_results` table is NOT
+  added now (YAGNI — no consumer needs runner checks queryable yet; it can be
+  added additively when a real feature requires it).
+- Implemented via `openspec-apply-change` skill on branch
+  `feat/change-c-repo-intake` (never on `main`).
+- 1 new service class: `app/Services/RepoIntakeService.php`.
+- 1 new exception: `app/Services/RunnerCrashException.php`.
+- 1 new test class: `tests/Feature/RepoIntakeServiceTest.php` — 5 tests.
+- No migrations, no `evidence` changes, no `domain-model` spec modifications.
+
+**Hard rules respected:**
+- **R2** — the runner CLI is invoked as-is via `php <runner-bin> <repoPath>`;
+  no `apps/runner/` files modified. The service is the caller, not a
+  modification of the runner. A test asserts no tracked `apps/runner/` file is
+  modified after an intake run.
+- **R3** — the service creates ZERO `Evidence` rows. The runner's structural
+  checks are input artifacts, not per-competence Pass 1 findings. They live in
+  `runner_report_json` on the `Run`. `evidence` stays strictly per-competence
+  as Change B designed it. A test asserts `Evidence::where('run_id',
+  $run->id)->count() === 0` after a successful intake.
+- **R4** — `operator_persona` is stored on `StudentRepo` (hidden per
+  Change B), never passed to the runner subprocess, and never written to any
+  `Evidence` row (none exist). A test asserts the persona does not leak into
+  the runner report JSON.
+- **R1** — not touched (no LLM, no Draft, deterministic only).
+- **R5** — boring: one service, one subprocess call, one parse, one
+  transaction, one cleanup. No clever heuristics.
+
+**Test results at handoff:**
+```
+php vendor/bin/phpunit
+26 tests, 68 assertions, 0 failures (21 existing domain + 5 new intake)
+```
+Slow tests (3 of the 5) run the real runner against `valid_repo` (~18s each);
+fast tests (2 of 5) use the error path.
+
+**Sandbox/security boundary:** NOT touched. No `apps/runner` changes, no
+Docker, no egress, no secrets. Cloning is under the v0 "trusted operator repos
+on local Laragon host" constraint. Sandbox hardening stays deferred to
+`change/runner-sandbox` (requires human review).
+
+**Next planned step:** Archive `repo-intake` after the operator merges the PR,
+then proceed to the next change in the 2026-06-24 sequencing (likely the LLM
+Pass 1 wiring or the web UI for run orchestration).
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `repo-intake` is
+> implemented on `feat/change-c-repo-intake` with a PR open against `main`
+> (26/26 tests green, R2/R3/R4 respected, Option X — no Evidence rows, no
+> `domain-model` modification). The operator reviews and merges. After merge,
+> archive the change and proceed to the next change (LLM Pass 1 wiring or
+> web UI orchestration). Hard rules and the v0 sandbox-deferral stand.
