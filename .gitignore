@@ -1,0 +1,20 @@
+# dependencies (rebuilt from lockfiles)
+**/vendor/
+**/node_modules/
+
+# env & secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# build output
+**/public/build/
+**/dist/
+
+# local db (sqlite path)
+**/database/*.sqlite
+
+# os / editor noise
+.DS_Store
+.idea/
+.vscode/

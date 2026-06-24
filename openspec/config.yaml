@@ -1,0 +1,53 @@
+schema: spec-driven
+
+context: |
+  PROJECT: Mizan — internal bootcamp autograder. Single operator (instructor).
+  It ingests a project brief, a competence référentiel with levels, and student
+  Git repos; runs deterministic structural checks; drafts an evidence-backed
+  competence grid (valide / non valide / à vérifier); and generates tiered oral
+  questions. It ASSISTS the instructor's evaluation — it never replaces it.
+
+  ARCHITECTURE: Monorepo.
+  - apps/web: Laravel 13 + Livewire + DaisyUI. Operator control panel, no auth
+    (single user). Orchestrates runs, shows drafts, lets operator edit + finalize.
+  - apps/runner: containerized PHP worker. Executes UNTRUSTED student code.
+  - DB: MySQL (Laragon, local). Queue: sync now; Horizon/Redis later.
+  - Inference: Anthropic API via metered key. NEVER a chat subscription.
+
+  HARD RULES (violating these is a defect, not a style choice):
+  R1. The LLM NEVER emits a final verdict. Deterministic checks + LLM produce
+      EVIDENCE and a DRAFT. Anything needing oral confirmation defaults to
+      "à vérifier", never "valide". The operator finalizes, always.
+  R2. Runner stays dumb and constant. Structural checks are stack-specific and
+      do NOT change per brief. Only the référentiel + brief (LLM context) vary.
+  R3. Two-pass grading, strictly separated:
+      Pass 1 (blind): per-competence, evidence-first, every claim cites file+line,
+        ZERO student identity in context. Low temperature, JSON output.
+      Pass 2 (contextual): uses student level/history. NEVER re-grades, NEVER
+        auto-downgrades. Divergence and regression are PROBE FLAGS only.
+  R4. Persona/level is the operator's private tag. It NEVER appears in
+      student-facing output and NEVER enters Pass 1.
+  R5. Boring app, rich operations. Keep app logic minimal; resist clever checks.
+
+  SECURITY (runner runs untrusted code — treat as hostile):
+  ephemeral container, network egress restricted during composer install,
+  no secrets mounted into the student container, hard CPU/memory/time limits.
+  Any change touching the runner/sandbox/egress boundary REQUIRES human review.
+
+  UI: DaisyUI on Tailwind v4 only; never hand-roll a design system. On any real
+  aesthetic decision (accent, density, light/dark), PAUSE and ask the operator
+  with 2–3 concrete options + a recommendation. Operator always reviews and edits
+  drafts before finalize — never auto-accept, never soften a real "non valide".
+
+rules:
+  proposal:
+    - State which hard rule(s) (R1–R5) the change touches and how it respects them.
+    - Keep changes atomic; if tasks exceed ~15, split the change.
+  specs:
+    - Use Given/When/Then scenarios.
+    - Specify exact JSON shapes for any LLM input/output contract.
+  design:
+    - Note the sandbox/security impact explicitly, even if "none".
+  tasks:
+    - Tasks must be small and implementation-ready.
+    - Include a test or check for each behavioral claim.
