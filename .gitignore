@@ -6,6 +6,9 @@
 **/.env
 **/.env.*
 !**/.env.example
+# Narrow exception: the env_committed_fixture's .env is a FAKE fixture
+# (APP_KEY=abc123) committed on purpose so EnvNotTrackedCheck can detect it.
+!apps/runner/tests/fixtures/env_committed_repo/.env
 
 # build output
 **/public/build/

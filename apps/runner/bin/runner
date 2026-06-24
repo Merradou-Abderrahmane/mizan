@@ -1,0 +1,74 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Mizan runner CLI entry point.
+ *
+ * Contract (see openspec/changes/runner-foundation-v0/specs/runner-cli/spec.md):
+ *   php bin/runner <repoPath> [--composer=<path>] [--workdir=<path>]
+ *
+ * - Exactly one JSON Report object to stdout; nothing else on stdout.
+ * - All logs to stderr.
+ * - Exit codes:
+ *     0 — report status "pass"
+ *     1 — report status "fail" or "error", OR invalid repo path
+ *     2 — usage error (no repoPath arg)
+ */
+
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "Runner must be invoked from PHP CLI.\n");
+    exit(2);
+}
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Mizan\Runner\InvalidInput;
+use Mizan\Runner\Runner;
+
+$argv = $argv ?? [];
+$rawRepoPath = firstPositional($argv);
+
+try {
+    $input = \Mizan\Runner\Input::fromArgv($argv);
+} catch (InvalidInput $e) {
+    if ($e->getCode() === 2) {
+        fwrite(STDERR, "Usage: php bin/runner <repoPath> [--composer=<path>] [--workdir=<path>]\n");
+        fwrite(STDERR, $e->getMessage() . "\n");
+        exit(2);
+    }
+    // "error" status: emit a minimal Report JSON to stdout and exit 1.
+    $report = (new \Mizan\Runner\Report(
+        schemaVersion: 1,
+        runnerVersion: \Mizan\Runner\Runner::VERSION,
+        repoPath: $rawRepoPath ?? '',
+        startedAt: nowUtc(),
+    ))->markError($e->getMessage(), 'repo_path_not_found');
+    $report->setEndedAt(nowUtc());
+    $report->setDurationMs(0);
+    fwrite(STDOUT, $report->toJson());
+    exit(1);
+}
+
+$runner = new Runner();
+[$exitCode, $json] = $runner->run($input);
+fwrite(STDOUT, $json);
+exit($exitCode);
+
+function firstPositional(array $argv): ?string
+{
+    for ($i = 1, $n = count($argv); $i < $n; $i++) {
+        $a = $argv[$i];
+        if ($a === '--') continue;
+        if (str_starts_with($a, '--composer=')) continue;
+        if (str_starts_with($a, '--workdir=')) continue;
+        return $a;
+    }
+    return null;
+}
+
+function nowUtc(): string
+{
+    return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d\TH:i:s.v\Z');
+}
