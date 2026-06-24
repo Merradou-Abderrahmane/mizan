@@ -98,3 +98,48 @@ persona kept out of student-facing output). Sandbox impact: none.
 > `Change B — Domain model & migrations` and propose it via the `openspec-propose`
 > skill, continuing the same OpenSpec propose → apply → archive loop. The hard
 > rules and the temporary v0 sandbox-deferral decision stand.
+
+---
+
+## 2026-06-24 — Step 1 closeout: archive + sync + merge to main
+
+Session (Claude Code) that picked up immediately after the apply above. No new
+feature code — this was the OpenSpec closeout loop for `runner-foundation-v0`.
+
+**What happened:**
+- Ran `openspec archive runner-foundation-v0 -y`. This did TWO things in one
+  authoritative step: (1) **synced** the delta spec into the canonical spec at
+  `openspec/specs/runner-cli/spec.md` (created it — `runner-cli: create`, 8
+  requirements added), and (2) **archived** the change folder to
+  `openspec/changes/archive/2026-06-24-runner-foundation-v0/`.
+  - Note for next session: archiving is NOT a verbatim file move. The delta uses
+    `## ADDED Requirements` headers; the CLI transforms it into the canonical
+    `## Purpose` + `## Requirements` shape. Don't hand-write canonical specs —
+    let `openspec archive` (or `openspec-sync-specs`) do it.
+- `openspec archive` leaves the Purpose as a `TBD` placeholder. Replaced it with
+  a real Purpose tying the runner to R2 (dumb/constant) and R1 (evidence, never
+  a verdict). `openspec validate runner-cli --specs` → ✓ passes.
+- Merged to `main`: the feature branch `feat/runner-foundation-v0` was merged via
+  GitHub PRs (#1 then #2 → `da3568f`). Local `main` fast-forwarded
+  `0c40538..da3568f`. Feature branch deleted both locally and on `origin`.
+
+**State at handoff:**
+- On `main`, clean, in sync with `origin/main` at `da3568f`.
+- `openspec/changes/` active folder holds only `archive/`. No active changes.
+- `openspec/specs/runner-cli/spec.md` is the canonical, validated spec.
+- `runner-foundation-v0` is DONE: applied, archived, spec promoted, merged.
+
+**Next planned step is UNCHANGED: Change B — Domain model & migrations.**
+Start it fresh from `main` with a new feature branch + `openspec-propose`.
+Proposed scope (per 2026-06-24 sequencing): `apps/web` Laravel migrations +
+Eloquent models for Referentiel(+Level), Brief, StudentRepo, Run, Evidence
+(file+line), Draft (valide / non valide / à vérifier), ProbeFlag (Pass 2
+divergence + regression). Touches R1, R3, R4. Sandbox impact: none.
+
+**One-liner to resume (GLM / OpenCode):**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `runner-foundation-v0`
+> is fully done (applied, archived, spec promoted to `openspec/specs/runner-cli`,
+> merged to `main` at `da3568f`). Branch off `main` and propose
+> `Change B — Domain model & migrations` via `openspec-propose`, continuing the
+> propose → apply → archive loop. Hard rules and the v0 sandbox-deferral stand.
