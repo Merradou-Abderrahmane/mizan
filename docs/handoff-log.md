@@ -412,3 +412,105 @@ canonical specs unchanged: `domain-model`, `repo-intake`, `runner-cli`.
 **Next planned step is UNCHANGED:** the next change is the LLM grading feature
 (Pass 1 wiring) or the web UI run orchestration — the operator will name it next
 and we branch off `main` + `openspec-propose` as usual.
+
+---
+
+## 2026-06-25 — Step 4: criteria-per-level (Change D) — schema grain fix before Pass 1
+
+**Change name:** `criteria-per-level`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-criteria-per-level/`
+**Branch:** `feat/criteria-per-level` — merged to `main` via PR #6 at `f0090fc`,
+then archived + spec synced + Purpose fixed (this closeout).
+
+**Why this change existed (caught during pre-Pass-1 review):** the real
+référentiel's evaluable unit is the **critère d'évaluation**, which belongs to a
+`(Competence, Level)` pair (a competence spans three progressive levels — Niveau 1
+émerger / 2 adapter / 3 transposer — each with its own criteria). Change B never
+modeled criteria: no criterion entity, a wrong single nullable
+`competences.level_id` ("competence is at one level"), and Pass-1
+`evidence`/`drafts`/`probe_flags` keyed on `competence_id`. Wiring LLM Pass 1
+against that would have graded at **competence grain** (one verdict per competence)
+instead of per criterion. This had to land BEFORE the Pass 1 change. Tables were
+empty (pre-launch), so the re-grain was free.
+
+**What happened:**
+- Proposed via `openspec-propose`: proposal, design, specs delta (MODIFIES
+  `domain-model`), tasks — `openspec validate --strict` green.
+- Two operator decisions captured up front: (1) `criterion_id` is the **single
+  grain key** on the three Pass-1 tables (drop `competence_id`, not keep both —
+  same one-meaning-per-table discipline as Change C's Option X); (2) land by
+  **editing the existing Change B migration files** + `migrate:fresh` (zero data,
+  no data migration).
+- Operator asked (before approval) to confirm the archived canonical spec would
+  not disagree with the migrations. Found a real gap: the delta engine only
+  rewrites `### Requirement:` blocks, NOT the `## Purpose` prose — which still said
+  "verdict for each competence". Added explicit closeout tasks (group 6) to
+  hand-fix the Purpose + grep-verify. (Confirmed below.)
+- Implemented via `openspec-apply-change` on the branch:
+  - ADD `criteria` table (migration `2026_06_24_100002b`, ordered after
+    competences+levels, before evidence): `competence_id` (FK→competences cascade),
+    `level_id` (FK→levels cascade), `code`/`label`/`description`/`sort_order`,
+    `unique(competence_id, level_id, code)`.
+  - ADD `Criterion` model (`$table = 'criteria'` — irregular plural) + factory;
+    `Competence`/`Level` `hasMany` criteria.
+  - DROP `competences.level_id` + `Competence::level()`.
+  - RE-GRAIN `evidence`/`drafts`/`probe_flags`: `competence_id → criterion_id`
+    (FK→criteria, RESTRICT). Models + factories re-pointed.
+  - `DomainSchemaTest` rewritten to criterion grain (incl. unique-code-across-levels,
+    "no `competence_id` on Pass-1 tables", criterion-grain relations, factory test
+    over 10 models). R1/R3/R4 guarantees preserved, just re-pointed at criterion.
+
+**Hard rules:** R1 (`drafts.ai_status` DB default `'à vérifier'` + `finalVerdict()`
+guard unchanged), R3 (`evidence` vs `probe_flags` stay structurally separate, now
+on criterion), R4 (no persona/student-identity on `criteria` or re-grained tables;
+identity path stays `→ run → student_repo`). R2/R5 untouched.
+**Sandbox/security boundary: NONE** — no `apps/runner`, Docker, egress, or secrets.
+v0 trusted-repos deferral stands.
+
+**Test results at handoff:**
+```
+DomainSchemaTest      24/24 green (1.9s, sqlite :memory:)
+RepoIntakeServiceTest  5/5 green in isolation (84s — real runner is slow)
+MySQL migrate:fresh    full set builds, FK ordering correct (criteria at 100002b)
+```
+Note: a combined run once showed 3 `RepoIntakeServiceTest` timeouts — that was CPU
+contention from a duplicate background run timing out the real runner subprocess
+(>60s), NOT a regression; confirmed by the isolated 5/5 pass.
+
+**Archive + spec sync + Purpose fix (this closeout):**
+- `openspec archive criteria-per-level -y` → applied the delta into
+  `openspec/specs/domain-model/spec.md` (**+1 added** Criteria, **~5 modified**
+  Competence/Evidence/Draft/ProbeFlag/factories) and archived the change folder to
+  `2026-06-25-criteria-per-level`.
+- **Manual `## Purpose` fix** (the delta engine does NOT touch Purpose prose):
+  changed "verdict for each competence" → "for each criterion — the evaluable unit
+  of a `(competence, level)` pair", and added levels/criteria to the stored-entity
+  list. This is the per-change manual Purpose step (same as Steps 1–3).
+- **Grep-verified** the archived canonical spec: every `level_id`/`competence_id`
+  hit is now either a negative guard ("SHALL NOT have…") or a legitimate `criteria`
+  reference (its own FKs + unique constraint + factory auto-parent). `for each
+  competence` → zero hits. `openspec validate --specs` → all 3 specs pass.
+
+**State at handoff:**
+- On `main`, in sync with `origin/main` after this closeout push.
+- `openspec/changes/` active folder holds only `archive/`. No active changes.
+- Canonical specs on `main`: `domain-model` (now 10 requirements, criterion grain),
+  `repo-intake` (5), `runner-cli` (8).
+- `criteria-per-level` is DONE: applied, merged (PR #6 at `f0090fc`), archived,
+  spec promoted + Purpose corrected, closeout pushed.
+
+**Next planned step:** the LLM **Pass 1 wiring** (now safe to build at criterion
+grain) OR the web UI run orchestration — operator names it next. Branch off `main`
++ `openspec-propose`, continuing the propose → apply → archive loop with the branch
++ PR gate. Hard rules and the v0 sandbox-deferral stand.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `criteria-per-level` is
+> fully done (applied, merged via PR #6 at `f0090fc`, archived at
+> `2026-06-25-criteria-per-level`, `domain-model` spec promoted to criterion grain
+> + Purpose corrected, closeout pushed). The schema now grades at criterion grain
+> (criteria = the `(competence, level)` evaluable unit; `evidence`/`drafts`/
+> `probe_flags` key on `criterion_id`). Branch off `main` and propose the next
+> change (LLM Pass 1 wiring at criterion grain, or web UI run orchestration) via
+> `openspec-propose`. Hard rules and the v0 sandbox-deferral stand.

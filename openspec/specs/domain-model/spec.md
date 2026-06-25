@@ -4,9 +4,13 @@
 
 The domain model is the persistence layer for the Mizan grading pipeline. It
 provides the tables and Eloquent models that `apps/web` uses to store
-référentiels, briefs, student repos, runs, Pass 1 evidence (file+line
-citations), Pass 2 probe flags (divergence/regression), and the AI draft vs
-operator-finalized verdict for each competence.
+référentiels (with their levels and criteria), briefs, student repos, runs,
+Pass 1 evidence (file+line citations), Pass 2 probe flags (divergence/regression),
+and the AI draft vs operator-finalized verdict for each criterion — the evaluable
+unit of a `(competence, level)` pair. A competence spans three progressive levels
+(Niveau 1 émerger / 2 adapter / 3 transposer); each `(competence, level)` pair
+carries its own criteria, and grading happens at criterion grain (competence and
+level attainment are roll-ups, not stored verdicts).
 
 The schema enforces the hard rules structurally, not just in app logic:
 - **R1** — `drafts` separates `ai_status` (DB default `'à vérifier'`) from
@@ -51,32 +55,35 @@ model SHALL have a `belongsTo` relation to `Referentiel`.
 ### Requirement: Competence table
 The system SHALL create a `competences` table with columns: `id` (bigint, PK),
 `referentiel_id` (bigint, FK → `referentiels.id`, ON DELETE CASCADE),
-`level_id` (bigint, FK → `levels.id`, nullable, ON DELETE SET NULL),
 `code` (string, not null), `label` (string, not null), `description` (text,
 nullable), `created_at`, and `updated_at`.
 
-The `Competence` model SHALL have a `belongsTo` relation to `Referentiel` and a
-`belongsTo` relation to `Level` (nullable). The `Referentiel` model SHALL have
-a `hasMany` relation to `Competence`.
+The `competences` table SHALL NOT have a `level_id` column. A competence is not
+"at" a single level — it spans all three progressive levels, and the
+`(competence, level)` association is carried by the `criteria` table. The
+`Competence` model SHALL have a `belongsTo` relation to `Referentiel` and a
+`hasMany` relation to `Criterion`. The `Competence` model SHALL NOT have a
+`level()` relation. The `Referentiel` model SHALL have a `hasMany` relation to
+`Competence`.
 
 #### Scenario: Competence table migrates cleanly
 - **GIVEN** the `referentiels` and `levels` tables already exist
 - **WHEN** `php artisan migrate` is run
 - **THEN** the `competences` table SHALL exist
 - **AND** it SHALL have a non-nullable `referentiel_id` foreign key
-- **AND** it SHALL have a nullable `level_id` foreign key
+- **AND** it SHALL NOT have a `level_id` column
 
-#### Scenario: Competence belongs to Referentiel and optionally to Level
-- **GIVEN** a persisted `Competence` linked to a `Referentiel` and a `Level`
-- **WHEN** `$competence->referentiel` and `$competence->level` are accessed
-- **THEN** both SHALL return the related model instances
+#### Scenario: Competence belongs to Referentiel
+- **GIVEN** a persisted `Competence` linked to a `Referentiel`
+- **WHEN** `$competence->referentiel` is accessed
+- **THEN** it SHALL return the related `Referentiel` instance
 
-#### Scenario: Competence without a Level
-- **GIVEN** a persisted `Competence` with `level_id` set to null
-- **WHEN** `$competence->level` is accessed
-- **THEN** it SHALL return null
-
----
+#### Scenario: Competence reaches its levels through criteria, not a direct FK
+- **GIVEN** a persisted `Competence`
+- **WHEN** the `competences` table column list is inspected
+- **THEN** there SHALL be no `level_id` column
+- **AND** the competence's levels SHALL be reachable only via its `criteria`
+  (`$competence->criteria` → each `$criterion->level`)
 
 ### Requirement: Brief table
 The system SHALL create a `briefs` table with columns: `id` (bigint, PK),
@@ -167,7 +174,8 @@ The `Run` model SHALL have a `belongsTo` relation to `StudentRepo`, a
 ### Requirement: Evidence table — Pass 1 blind, file+line citations, no student identity
 The system SHALL create an `evidence` table with columns: `id` (bigint, PK),
 `run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
-`competence_id` (bigint, FK → `competences.id`, ON DELETE RESTRICT),
+`criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable
+unit this evidence supports),
 `check_id` (string, not null — the runner check that produced this evidence,
 e.g., `composer_install`, `readme_real`),
 `file_path` (string, nullable — relative path from repo root, or null when
@@ -180,27 +188,31 @@ applicable),
 `status` (string, not null — one of: `pass`, `fail`, `skip`),
 `message` (string, nullable), `created_at`, and `updated_at`.
 
-The `evidence` table SHALL NOT have a `student_repo_id` column. The `evidence`
-table SHALL NOT have an `operator_persona` column. This enforces R3 (Pass 1 is
-blind — zero student identity in context) and R4 (persona never enters Pass 1)
-at the schema level.
+The `evidence` table SHALL be keyed on `criterion_id` as its single grain key —
+it SHALL NOT have a `competence_id` column; the competence is reachable via
+`criterion → competence`. The `evidence` table SHALL NOT have a `student_repo_id`
+column. The `evidence` table SHALL NOT have an `operator_persona` column. This
+enforces R3 (Pass 1 is blind — zero student identity in context) and R4 (persona
+never enters Pass 1) at the schema level, at the criterion grain.
 
 The `Evidence` model SHALL have a `belongsTo` relation to `Run` and a
-`belongsTo` relation to `Competence`.
+`belongsTo` relation to `Criterion`.
 
 #### Scenario: Evidence table migrates cleanly
-- **GIVEN** the `runs` and `competences` tables already exist
+- **GIVEN** the `runs` and `criteria` tables already exist
 - **WHEN** `php artisan migrate` is run
 - **THEN** the `evidence` table SHALL exist
-- **AND** it SHALL have `run_id` and `competence_id` foreign keys
+- **AND** it SHALL have `run_id` and `criterion_id` foreign keys
+- **AND** it SHALL NOT have a `competence_id` column
 - **AND** it SHALL NOT have a `student_repo_id` column
 - **AND** it SHALL NOT have an `operator_persona` column
 
-#### Scenario: Evidence cites file and line (R3)
-- **GIVEN** a persisted `Evidence` record for a `readme_real` check that
-  failed
+#### Scenario: Evidence cites file and line at criterion grain (R3)
+- **GIVEN** a persisted `Evidence` record for a `readme_real` check that failed,
+  linked to a `Criterion`
 - **WHEN** the record is loaded
-- **THEN** `$evidence->file_path` SHALL equal `"README.md"`
+- **THEN** `$evidence->criterion` SHALL return the related `Criterion`
+- **AND** `$evidence->file_path` SHALL equal `"README.md"`
 - **AND** `$evidence->line_number` SHALL be null (no specific line for this
   check type) OR an integer ≥ 1
 
@@ -212,12 +224,11 @@ The `Evidence` model SHALL have a `belongsTo` relation to `Run` and a
 - **AND** the only way to reach a `StudentRepo` from `Evidence` is through
   `Run` (two joins)
 
----
-
 ### Requirement: Draft table — AI draft vs operator-finalized, default à vérifier (R1)
 The system SHALL create a `drafts` table with columns: `id` (bigint, PK),
 `run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
-`competence_id` (bigint, FK → `competences.id`, ON DELETE RESTRICT),
+`criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable
+unit this draft verdict is for),
 `ai_status` (string, not null, default `'à vérifier'` — the AI's draft
 assessment, one of: `valide`, `non valide`, `à vérifier`),
 `ai_raw_json` (json, nullable — the raw LLM response for auditability),
@@ -229,13 +240,18 @@ assessment, one of: `valide`, `non valide`, `à vérifier`),
 finalized; null means the draft is still a draft, NOT a verdict),
 `created_at`, and `updated_at`.
 
+The `drafts` table SHALL be keyed on `criterion_id` as its single grain key — it
+SHALL NOT have a `competence_id` column. Pass 1 produces one draft verdict per
+criterion; competence and level attainment are roll-ups of criterion verdicts,
+not stored draft rows.
+
 The `ai_status` column SHALL have a database-level DEFAULT of `'à vérifier'`
 so that even a raw INSERT with no application code produces a safe draft,
 never a phantom `valide` (R1: "anything needing oral confirmation defaults to
 à vérifier, never valide").
 
 The `Draft` model SHALL have a `belongsTo` relation to `Run` and a
-`belongsTo` relation to `Competence`.
+`belongsTo` relation to `Criterion`.
 
 The `Draft` model SHALL expose a `finalVerdict(): ?string` accessor that
 returns `operator_status` if and only if `finalized_at` is non-null; otherwise
@@ -244,9 +260,11 @@ read as a final verdict by any caller (R1: "the LLM never emits a final
 verdict; the operator finalizes, always").
 
 #### Scenario: Draft table migrates cleanly
-- **GIVEN** the `runs` and `competences` tables already exist
+- **GIVEN** the `runs` and `criteria` tables already exist
 - **WHEN** `php artisan migrate` is run
 - **THEN** the `drafts` table SHALL exist
+- **AND** it SHALL have a `criterion_id` foreign key and SHALL NOT have a
+  `competence_id` column
 - **AND** it SHALL have separate `ai_status` and `operator_status` columns
 - **AND** the `ai_status` column SHALL default to `'à vérifier'`
 - **AND** the `operator_status` column SHALL be nullable
@@ -272,36 +290,37 @@ verdict; the operator finalizes, always").
 - **AND** `operator_status` SHALL be null
 - **AND** `finalized_at` SHALL be null
 
-#### Scenario: Draft belongs to Run and Competence
-- **GIVEN** a persisted `Draft` linked to a `Run` and a `Competence`
-- **WHEN** `$draft->run` and `$draft->competence` are accessed
+#### Scenario: Draft belongs to Run and Criterion
+- **GIVEN** a persisted `Draft` linked to a `Run` and a `Criterion`
+- **WHEN** `$draft->run` and `$draft->criterion` are accessed
 - **THEN** both SHALL return the related model instances
-
----
 
 ### Requirement: ProbeFlag table — Pass 2 contextual, separate from Evidence (R3)
 The system SHALL create a `probe_flags` table with columns: `id` (bigint, PK),
 `run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
-`competence_id` (bigint, FK → `competences.id`, ON DELETE RESTRICT),
+`criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable
+unit this flag concerns),
 `kind` (string, not null — one of: `divergence`, `regression`),
 `context_payload` (json, nullable — the Pass 2 contextual data that triggered
 the flag, e.g., student history, level comparison; NEVER a re-grade),
 `message` (text, nullable — human-readable explanation of the flag),
 `created_at`, and `updated_at`.
 
-The `probe_flags` table SHALL NOT have `file_path` or `line_number` columns.
-Pass 2 probe flags are contextual, not file+line citations — they are
-structurally distinct from Pass 1 `evidence` (R3: "two-pass grading, strictly
-separated").
+The `probe_flags` table SHALL be keyed on `criterion_id` as its single grain key —
+it SHALL NOT have a `competence_id` column. The `probe_flags` table SHALL NOT have
+`file_path` or `line_number` columns. Pass 2 probe flags are contextual, not
+file+line citations — they are structurally distinct from Pass 1 `evidence`
+(R3: "two-pass grading, strictly separated").
 
 The `ProbeFlag` model SHALL have a `belongsTo` relation to `Run` and a
-`belongsTo` relation to `Competence`.
+`belongsTo` relation to `Criterion`.
 
 #### Scenario: ProbeFlag table migrates cleanly
-- **GIVEN** the `runs` and `competences` tables already exist
+- **GIVEN** the `runs` and `criteria` tables already exist
 - **WHEN** `php artisan migrate` is run
 - **THEN** the `probe_flags` table SHALL exist
-- **AND** it SHALL have `run_id` and `competence_id` foreign keys
+- **AND** it SHALL have `run_id` and `criterion_id` foreign keys and SHALL NOT
+  have a `competence_id` column
 - **AND** it SHALL have a `kind` column
 - **AND** it SHALL NOT have `file_path` or `line_number` columns
 
@@ -313,25 +332,26 @@ The `ProbeFlag` model SHALL have a `belongsTo` relation to `Run` and a
 - **AND** `evidence` SHALL NOT have `kind` (in the divergence/regression
   sense), `context_payload`, or `regression` columns
 - **AND** the two tables SHALL share no merged notes/blob column
+- **AND** both SHALL key on `criterion_id`
 
-#### Scenario: ProbeFlag belongs to Run and Competence
-- **GIVEN** a persisted `ProbeFlag` linked to a `Run` and a `Competence`
-- **WHEN** `$probeFlag->run` and `$probeFlag->competence` are accessed
+#### Scenario: ProbeFlag belongs to Run and Criterion
+- **GIVEN** a persisted `ProbeFlag` linked to a `Run` and a `Criterion`
+- **WHEN** `$probeFlag->run` and `$probeFlag->criterion` are accessed
 - **THEN** both SHALL return the related model instances
 
----
-
 ### Requirement: Model factories for all domain entities
-The system SHALL provide an Eloquent model factory for each of the 9 domain
-models: `Referentiel`, `Level`, `Competence`, `Brief`, `StudentRepo`, `Run`,
-`Evidence`, `Draft`, and `ProbeFlag`.
+The system SHALL provide an Eloquent model factory for each of the 10 domain
+models: `Referentiel`, `Level`, `Competence`, `Criterion`, `Brief`,
+`StudentRepo`, `Run`, `Evidence`, `Draft`, and `ProbeFlag`.
 
 Each factory SHALL produce a valid, persistable model instance with sensible
 defaults (e.g., `Draft` factory defaults `ai_status` to `'à vérifier'`,
 `operator_status` to null, `finalized_at` to null). Each factory SHALL support
 relational defaults so that `$factory->create()` can auto-create parent
 relations where needed (e.g., `Run::factory()->create()` auto-creates a
-`StudentRepo` and `Brief` if not provided).
+`StudentRepo` and `Brief` if not provided; `Criterion::factory()->create()`
+auto-creates a `Competence` and `Level`; `Evidence`/`Draft`/`ProbeFlag`
+factories auto-create a `Criterion` if not provided).
 
 #### Scenario: Draft factory defaults to safe à vérifier state (R1)
 - **GIVEN** the `Draft` factory
@@ -340,6 +360,13 @@ relations where needed (e.g., `Run::factory()->create()` auto-creates a
 - **AND** `operator_status` SHALL be null
 - **AND** `finalized_at` SHALL be null
 
+#### Scenario: Criterion factory auto-creates its (Competence, Level) parents
+- **GIVEN** the `Criterion` factory
+- **WHEN** `Criterion::factory()->create()` is called with no explicit
+  `competence_id` or `level_id`
+- **THEN** a `Competence` and a `Level` SHALL be auto-created and linked
+- **AND** the persisted `Criterion` SHALL have non-null `competence_id` and `level_id`
+
 #### Scenario: Run factory auto-creates parent relations
 - **GIVEN** the `Run` factory
 - **WHEN** `Run::factory()->create()` is called with no explicit `student_repo_id`
@@ -347,4 +374,51 @@ relations where needed (e.g., `Run::factory()->create()` auto-creates a
 - **THEN** a `StudentRepo` and a `Brief` SHALL be auto-created and linked
 - **AND** the persisted `Run` SHALL have non-null `student_repo_id` and
   `brief_id`
+
+### Requirement: Criteria table — the evaluable unit per (Competence, Level) pair
+The system SHALL create a `criteria` table with columns: `id` (bigint, PK),
+`competence_id` (bigint, FK → `competences.id`, ON DELETE CASCADE),
+`level_id` (bigint, FK → `levels.id`, ON DELETE CASCADE),
+`code` (string, not null — the criterion code, unique within its
+`(competence, level)` cell, e.g., `C1`),
+`label` (string, not null — short name of the critère d'évaluation),
+`description` (text, nullable — the full critère text),
+`sort_order` (integer, default 0), `created_at`, and `updated_at`.
+
+The table SHALL enforce `UNIQUE (competence_id, level_id, code)` so that the same
+`code` MAY repeat across levels but SHALL be unique within a single
+`(competence, level)` pair. A criterion is the référentiel's evaluable unit: a
+Competence spans three progressive Levels (Niveau 1 émerger / 2 adapter /
+3 transposer), and each `(Competence, Level)` pair carries its own criteria.
+
+The `Criterion` model SHALL have a `belongsTo` relation to `Competence` and a
+`belongsTo` relation to `Level`. The `Competence` model SHALL have a `hasMany`
+relation to `Criterion`. The `Level` model SHALL have a `hasMany` relation to
+`Criterion`.
+
+#### Scenario: Criteria table migrates cleanly
+- **GIVEN** the `competences` and `levels` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `criteria` table SHALL exist
+- **AND** it SHALL have a non-nullable `competence_id` foreign key referencing `competences.id`
+- **AND** it SHALL have a non-nullable `level_id` foreign key referencing `levels.id`
+
+#### Scenario: Criterion belongs to a (Competence, Level) pair
+- **GIVEN** a persisted `Criterion` linked to a `Competence` and a `Level`
+- **WHEN** `$criterion->competence` and `$criterion->level` are accessed
+- **THEN** both SHALL return the related model instances
+
+#### Scenario: Code is unique within a (competence, level) cell but may repeat across levels
+- **GIVEN** a `Competence` with two `Level` records (N1, N2) and a `Criterion`
+  `code = "C1"` under N1
+- **WHEN** another `Criterion` `code = "C1"` is created under N2 for the same competence
+- **THEN** it SHALL persist successfully
+- **AND** WHEN a second `Criterion` `code = "C1"` is created under N1 for the same competence
+- **THEN** the insert SHALL fail the unique constraint
+
+#### Scenario: Competence has many Criteria across its levels
+- **GIVEN** a persisted `Competence` with three `Criterion` records spread across
+  its levels
+- **WHEN** `$competence->criteria` is accessed
+- **THEN** it SHALL return a Collection containing exactly those three `Criterion` instances
 
