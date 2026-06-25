@@ -617,3 +617,109 @@ Branch off `main` + `openspec-propose`, propose → apply → archive with the P
 > JSON contract, parsing) via `opencode/zen GRADER_* env`. Branch off `main` +
 > `openspec-propose`; operator reviews the prompt closely before apply. Hard rules
 > and the v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-25 — Step 6: pass1-grading-core (Change E2a) — Pass 1 primitives
+
+**Change name:** `pass1-grading-core`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-pass1-grading-core/`
+**Branch:** `feat/pass1-grading-core` — merged via PR #8 at `9215874`, archived +
+spec created + Purpose written (this closeout).
+
+**Why split:** Pass 1 (the blind LLM grading) was split into **E2a (primitives,
+this change)** and **E2b (orchestration, next)**. E2a builds + unit-tests the four
+primitives so the prompt and parsing rules are locked in isolation, with the
+operator reviewing the prompt/parser closely and ZERO live network calls.
+
+**Operator decisions captured before apply:**
+- Code context = **bounded source digest** (read clone_path, exclude
+  vendor/node_modules/.git, byte-capped) — not agentic/criterion-targeted.
+- E2 invocation surface = **service + artisan command** (E2b), no UI.
+- **Prompt approved with two edits**, both implemented:
+  (a) rule 5 — the digest may be truncated; apparent absence → `à vérifier`, NEVER
+  `semble non valide` (absence in the excerpt ≠ absence in the project);
+  (b) per-criterion `reasoning` that, for `à vérifier`, distinguishes
+  "present-but-insufficient" (real gap) from "not-found" (probe orally).
+  Edit (b) added a `reasoning` field to the output contract → persisted to the
+  existing `drafts.ai_reasoning` (NO schema change).
+- **Egress accepted, conditional** on confirming glm-5.2 is zero-retention.
+
+**What shipped (all `app/Services/Pass1/`, no schema/runner change):**
+- `GraderClient` interface + `ZenGraderClient` (opencode/zen OpenAI-compatible;
+  primary `GRADER_MODEL`, fallback `GRADER_FALLBACK_MODEL` on 5xx/timeout; low temp;
+  JSON-response mode; one retry) + `FakeGraderClient` (queued, records prompts).
+  Bound `GraderClient → ZenGraderClient` in `AppServiceProvider`.
+- `config/grader.php` (reads `GRADER_*` + temperature/timeout/digest_max_bytes).
+- `RepoDigest`: deterministic, byte-capped, identity-free bundle; excludes
+  vendor/node_modules/.git/storage/bootstrap, dot-dirs, public/build; extension
+  allowlist; 1-based line numbers; `has(file,line)` citation verification;
+  `truncated` flag (clean-prefix truncation — stop at first file over the cap).
+- `Pass1Prompt`: blind `[system,user]` (no name/persona/clone_path/git author);
+  the operator-reviewed text incl. rule 5 + the reasoning instruction.
+- `Pass1ResponseParser` (+ `Pass1ParsedResult`/`ParsedCriterion` DTOs): coerce
+  non-hedged → `à vérifier` (R1); verify each evidence item via `RepoDigest::has`,
+  drop phantoms; empty-evidence criterion → `à vérifier`; capture reasoning; ignore
+  unknown criterion ids, default omitted ones to `à vérifier`; `parseWithRepair`
+  does one repair retry (via a `callable $reAsk`, decoupled from the client) then
+  flags `unparseable` carrying the raw text.
+
+**Hard rules:** R1 (hedged-only + coercion + no-evidence→à vérifier), R3 (blind,
+evidence-first, citations verified against the digest), R4 (no identity in
+digest/prompt). R2/R5 fine. **Security: NO live egress in this change** (fake grader
++ `Http::fake`). The real egress is E2b.
+
+**Test results:** `Pass1PrimitivesTest` 10/10; 46/46 across the non-runner suite
+(DomainSchema 34 + Pass1 10 + Example 2). No live HTTP in tests (grep-verified).
+The slow `RepoIntakeServiceTest` real-runner timeouts are a known environmental
+flake (Change C), unrelated to E2a and excluded from this run.
+
+**Archive + spec create + Purpose (this closeout):**
+- `openspec archive pass1-grading-core -y` → created canonical
+  `openspec/specs/pass1-grading/spec.md` (**+5 requirements**: digest, prompt,
+  output contract, parser, grader client) and archived the change folder.
+- Replaced the `TBD` Purpose with a real one (two-change capability; E2a primitives
+  vs E2b orchestration; R1/R3/R4; the egress gate for E2b). All 4 specs validate.
+
+**State at handoff:**
+- On `main`, in sync after this closeout push. Active `openspec/changes/` holds only
+  `archive/`. Canonical specs: `domain-model` (12), `pass1-grading` (5, E2a),
+  `repo-intake` (5), `runner-cli` (8).
+- `pass1-grading-core` is DONE: applied, merged (PR #8 at `9215874`), archived,
+  spec created + Purpose written, closeout pushed.
+
+**Zero-retention research (the E2b gate):** Per opencode/zen docs
+(https://opencode.ai/docs/zen/, fetched 2026-06-25): "Our providers follow a
+zero-retention policy and do not use your data for model training, with the
+following exceptions:" — the exceptions are only named FREE-tier trial models +
+OpenAI/Anthropic (30-day). Paid **glm-5.2 is NOT in the exceptions → default
+zero-retention, no training.** "All our models are hosted in the US." No API-vs-tool
+distinction in the text (zen IS the API gateway). **Residuals to confirm before the
+first real run:** that glm-5.2 is the paid zen model (catalog is behind the
+dashboard) and not a free variant; US-only residency; it's a docs representation,
+not a signed DPA. `GRADER_MODEL` is config so a verified model can be pinned.
+
+**Next planned step: Change E2b — Pass 1 orchestration.** `Pass1GradingService::
+grade(Run)`: resolve `brief.competences()->technical()` with pivot `level_id`; build
+the digest once; per competence call the grader (via the `GraderClient` interface),
+`parseWithRepair`, and persist (transaction) per-criterion `evidence` + `drafts`
+(incl. `ai_reasoning` from the new `reasoning` field) and one
+`pass1_competence_results` (rollup/confidence/probe_questions/raw_json/level_id);
+idempotent re-grade; invalid-output → safe `à vérifier` competence row. Plus
+`php artisan pass1:grade {run}`. **Gate: confirm glm-5.2 zero-retention before the
+first live run.** Branch off `main` + `openspec-propose`; the service ADDs
+requirements to the existing `pass1-grading` spec.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `pass1-grading-core` (E2a)
+> is done (merged PR #8 at `9215874`, archived, canonical `pass1-grading` spec with
+> 5 primitive requirements + Purpose). The Pass 1 primitives exist and are unit-tested
+> with no live network: `GraderClient`/`ZenGraderClient`/`FakeGraderClient`,
+> `RepoDigest` (has(file,line)), `Pass1Prompt` (blind, rule 5 + reasoning),
+> `Pass1ResponseParser` (coerce/drop-phantom/empty→à vérifier/reasoning/repair).
+> Next is **E2b — Pass1GradingService::grade(Run) + `pass1:grade` command** (ADDs to
+> the `pass1-grading` spec), persisting evidence/drafts/pass1_competence_results
+> idempotently. GATE before the first real run: confirm glm-5.2 zero-retention
+> (opencode/zen docs say paid models are zero-retention; verify glm-5.2 is the paid
+> zen model). Branch off `main` + `openspec-propose`. Hard rules + v0 sandbox stand.
