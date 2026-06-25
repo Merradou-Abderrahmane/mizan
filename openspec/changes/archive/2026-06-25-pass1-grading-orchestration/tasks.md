@@ -151,12 +151,13 @@
 
 - [x] 8.1 Branch `feat/pass1-grading-orchestration` off `main` at apply time.
   Never commit to `main`.
-- [ ] 8.2 Push branch, open PR; do NOT merge — operator reviews and merges.
-- [ ] 8.3 After PR merge: `openspec archive pass1-grading-orchestration -y` —
+- [x] 8.2 Push branch (commit `6ca7c82`), PR created + merged by operator
+  (PR #9 at `5f54791`).
+- [x] 8.3 After PR merge: `openspec archive pass1-grading-orchestration -y` —
   ADDs the 5 new requirements to the canonical `pass1-grading/spec.md`.
-- [ ] 8.4 Update the canonical `pass1-grading/spec.md` `## Purpose` to note E2b
+- [x] 8.4 Update the canonical `pass1-grading/spec.md` `## Purpose` to note E2b
   is done (orchestration + command shipped; the egress gate is the operator's
   go-live sign-off, not a code change).
-- [ ] 8.5 `openspec validate pass1-grading --specs` — passes.
-- [ ] 8.6 Append a handoff-log entry (E2b done; egress gate still outstanding
+- [x] 8.5 `openspec validate pass1-grading --specs` — passes (all 4 specs).
+- [x] 8.6 Append a handoff-log entry (E2b done; egress gate still outstanding
   for the first real run; next is Pass 2 or UI).

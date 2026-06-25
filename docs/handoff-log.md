@@ -723,3 +723,130 @@ requirements to the existing `pass1-grading` spec.
 > idempotently. GATE before the first real run: confirm glm-5.2 zero-retention
 > (opencode/zen docs say paid models are zero-retention; verify glm-5.2 is the paid
 > zen model). Branch off `main` + `openspec-propose`. Hard rules + v0 sandbox stand.
+
+---
+
+## 2026-06-25 — Step 7: pass1-grading-orchestration (Change E2b) — Pass 1 orchestration
+
+**Change name:** `pass1-grading-orchestration`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-pass1-grading-orchestration/`
+**Branch:** `feat/pass1-grading-orchestration` → merged via PR #9 at `5f54791`,
+archived + canonical spec updated + Purpose rewritten (this closeout).
+
+**Why:** E2a shipped the Pass 1 primitives (grader client, digest, prompt,
+parser) as standalone unit-tested units with no live network. E2b wires them to
+a `Run`: `Pass1GradingService::grade(Run)` + `php artisan pass1:grade {run}`.
+The split kept the operator's close review of the prompt/parser (E2a) isolated
+from the persistence/idempotency/failure-isolation rules (E2b).
+
+**Operator decisions captured before apply:**
+- **Failure-row shape:** on unparseable/throwing output, persist ONLY the
+  `pass1_competence_results` rollup (`à vérifier` + `raw_json` audit trail) and
+  NO `evidence`/`drafts` rows for that competence's criteria — so "failure" is
+  visibly distinct from "graded-empty" and the `raw_json` is the audit signal.
+  (Alternative considered: also write one `à vérifier` `drafts` row per
+  criterion; rejected — would conflate failure with graded-empty.)
+- **`pass1_partial` exit code:** exit 0 on partial so a cron/operator sees the
+  partial results rather than a non-zero exit hiding them; exit 1 reserved for
+  hard preconditions (run not found, no technical competences, digest threw).
+
+**What shipped (all `apps/web`, no schema/runner/UI change):**
+- `Pass1GradingService::grade(Run)` in `app/Services/Pass1/`: resolves
+  `brief.competences()->technical()` with `withPivot('level_id')`; builds
+  `RepoDigest` once from `run.studentRepo.clone_path`; per competence: loads
+  criteria at `pivot.level_id`, renders `Pass1Prompt`, calls `GraderClient`,
+  `parseWithRepair` (with a `$reAsk` closure that re-calls the client with the
+  repair hint), and persists in a per-competence `DB::transaction`
+  (delete-then-reinsert scoped to the competence) the per-criterion `evidence`
+  + `drafts` (incl. `ai_reasoning`) + one `pass1_competence_results` rollup
+  (`updateOrCreate` — AI columns only, never touches
+  `operator_status`/`operator_note`/`finalized_at`).
+- `Pass1CompetenceOutcome` DTO: `competence_id`/`label`/`level_id`/
+  `status`(`graded`|`failed`)/`reason`/`criterion_count`; no identity, no verdict.
+- `Pass1GradeCommand` (`php artisan pass1:grade {run}`): sets
+  `run.started_at`/`ended_at`, calls the service, sets `run.status` to
+  `pass1_done` (all graded) or `pass1_partial` (any failed), prints a
+  per-competence summary + final line `Run {id}: pass1_done|partial (N graded,
+  M failed)`. Exit 0 on done/partial; exit 1 on run-not-found /
+  no-technical-competences / digest-build-threw.
+
+**Idempotent re-grade:** delete-then-reinsert scoped to the competence's
+criteria; `updateOrCreate` on the rollup keyed `(run_id, competence_id)`. A
+re-grade overwrites AI columns, leaves `operator_status`/`operator_note`/
+`finalized_at` intact — the operator's prior finalization on any competence is
+preserved (tested: `test_regrade_preserves_operator_finalization`).
+
+**Failure isolation (R1):** each competence's call+parse is in try/catch.
+`unparseable` → safe `à vérifier` rollup with `raw_json = {unparseable: true,
+raw: <text>}`, no evidence/drafts. Thrown exception → the competence's
+transaction rolls back, then a fresh tiny transaction persists a safe
+`à vérifier` rollup with `raw_json = {error: <class>: <message>}`. All other
+competences still grade; the run never aborts (tested: unparseable + grader
+throws + persistence-exception rolls back only that competence).
+
+**Transaction integrity:** one `DB::transaction` per competence, NO whole-run
+transaction (grep-verified). A mid-run crash leaves committed competences
+intact and the in-flight one with no rows (no half-written competence).
+
+**Hard rules:** R1 (hedged-only via E2a parser + E1 column contract; service
+never writes operator columns; `à vérifier` safe default on failure;
+`finalVerdict()` stays null until the operator finalizes), R3 (blind,
+evidence-first, one call per competence at its pivot target level, citations
+verified by the parser), R4 (no identity in digest/prompt; service reads
+`clone_path` only to build the digest, never into a prompt — tested:
+`test_no_student_identity_in_prompts`), R5 (boring iterate-call-parse-persist).
+R2 untouched.
+
+**Test results:** `Pass1GradingServiceTest` 9/9 (67 assertions);
+`Pass1GradeCommandTest` 4/4 (17 assertions); full non-runner suite **64/64
+green** (245 assertions) including the existing `Pass1PrimitivesTest`,
+`DomainSchemaTest`, and the slow `RepoIntakeServiceTest` (no regression). Zero
+live HTTP in the new tests (grep-verified; `FakeGraderClient` only).
+
+**Archive + spec update + Purpose (this closeout):**
+- `openspec archive pass1-grading-orchestration -y` → **+5 added** to canonical
+  `openspec/specs/pass1-grading/spec.md` (Pass1GradingService orchestration,
+  idempotent re-grade, failure isolation, per-competence transaction integrity,
+  `pass1:grade` command). Archived to `2026-06-25-pass1-grading-orchestration`.
+- Rewrote canonical `## Purpose`: both E2a + E2b done; R1/R3/R4 enforcement
+  noted; the egress gate is the operator's go-live sign-off, not a code change.
+- All 4 specs validate (`openspec validate --specs`).
+
+**State at handoff:**
+- On `main`, in sync after this closeout push. Active `openspec/changes/` holds
+  only `archive/`. Canonical specs: `domain-model` (12), `pass1-grading` (10:
+  5 E2a primitives + 5 E2b orchestration), `repo-intake` (5), `runner-cli` (8).
+- `pass1-grading-orchestration` is DONE: applied, merged (PR #9 at `5f54791`),
+  archived, spec updated + Purpose rewritten, closeout to be pushed.
+
+**Egress gate (still outstanding — operator's go-live sign-off):** Before the
+first REAL `php artisan pass1:grade {run}` invocation, the operator must
+confirm `glm-5.2` (`GRADER_MODEL`) is on opencode/zen's zero-retention path.
+Per opencode/zen docs (fetched 2026-06-25): paid models are zero-retention /
+no-training by default; the listed exceptions are free-tier trial models +
+OpenAI/Anthropic (30-day); glm-5.2 is NOT in the exceptions. Residuals to
+confirm: (a) glm-5.2 is the *paid* zen model, not a free variant; (b) US-only
+residency is acceptable; (c) the docs are a representation, not a signed DPA.
+`GRADER_MODEL` is config so a verified model can be pinned. **This gate does
+NOT block the build, the test suite, or the merge — only the first live run.**
+
+**Next planned step:** Pass 1 is now feature-complete end-to-end (primitives +
+orchestration + command). The natural next steps are either (a) the operator's
+UI to view/edit/finalize Pass 1 drafts + trigger `pass1:grade` from the control
+panel, or (b) Pass 2 (contextual probe flags, uses student level/history,
+never re-grades), or (c) the operator confirms the egress gate and runs
+`pass1:grade` for real on a v0 trusted repo. The operator decides which next.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `pass1-grading-orchestration`
+> (E2b) is done (merged PR #9 at `5f54791`, archived, canonical `pass1-grading`
+> spec at 10 requirements: 5 E2a primitives + 5 E2b orchestration, Purpose
+> rewritten). Pass 1 is feature-complete: `Pass1GradingService::grade(Run)`
+> (technical-only, one digest per run, one call per competence, idempotent,
+> failure-isolated, per-competence transaction) + `php artisan pass1:grade {run}`
+> (sets `run.status`, per-competence summary, exit 0 on done/partial). 64/64
+> tests green, zero live HTTP. GATE before the first real run: confirm glm-5.2
+> zero-retention (operator's go-live sign-off, not a code change). Next is the
+> operator's choice: Pass 1 UI, Pass 2, or the first real graded run. Hard rules
+> + v0 sandbox-deferral stand.
