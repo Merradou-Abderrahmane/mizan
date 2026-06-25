@@ -248,7 +248,7 @@ The `Evidence` model SHALL have a `belongsTo` relation to `Run` and a
 - **AND** the only way to reach a `StudentRepo` from `Evidence` is through
   `Run` (two joins)
 
-### Requirement: Draft table — AI per-criterion assessment, default à vérifier (R1)
+### Requirement: Draft table — AI draft vs operator-finalized, default à vérifier (R1)
 The system SHALL create a `drafts` table with columns: `id` (bigint, PK),
 `run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
 `criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable

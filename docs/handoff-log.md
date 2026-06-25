@@ -514,3 +514,106 @@ grain) OR the web UI run orchestration — operator names it next. Branch off `m
 > `probe_flags` key on `criterion_id`). Branch off `main` and propose the next
 > change (LLM Pass 1 wiring at criterion grain, or web UI run orchestration) via
 > `openspec-propose`. Hard rules and the v0 sandbox-deferral stand.
+---
+
+## 2026-06-25 — Step 5: pass1-schema (Change E1) — domain ready for Pass 1
+
+**Change name:** `pass1-schema`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-pass1-schema/`
+**Branch:** `feat/pass1-schema` — merged to `main` via PR #7 at `de8d0dc`, then
+archived + spec synced + Purpose/title fixed (this closeout).
+
+**Why:** the LLM Pass 1 wiring (next change, E2) grades per criterion at a target
+level, one call per TECHNICAL competence, rolling up to a competence-level draft.
+Post `criteria-per-level` the schema had criterion-grain criteria/evidence/drafts
+but could not express: technical-vs-transversal, the per-competence target level,
+the hedged `semble…` vocabulary, or the per-competence rollup/confidence/probe
+storage. E1 adds exactly those — SCHEMA ONLY. E2 (LLM service/prompt/contract) is
+a separate proposal the operator will review closely.
+
+**Operator decisions captured:** (1) target level is per-competence on the Brief
+(a `brief_competence` pivot with `level_id`); (2) rollup + confidence +
+probe_questions live in a new `pass1_competence_results` table keyed
+(run, competence); (3) split E1 schema / E2 wiring; (4) **D4 confirmed by the
+operator's real workflow** — they record exactly one `valide`/`non valide` per
+COMPETENCE, never per criterion, so finalization is competence-grain only and
+`drafts` becomes AI-only (no per-criterion operator fields — that would be
+over-building). (5) `competences.kind` defaults to `transversale` (safe-exclude).
+
+**What shipped:**
+- ADD `competences.kind` (`technique`|`transversale`, DEFAULT `transversale`) +
+  `Competence::technical()` scope. Pass 1 grades `technique` only; transversal
+  competences never enter a prompt.
+- ADD `brief_competence` pivot (`brief_id`, `competence_id`, `level_id`,
+  `unique(brief_id, competence_id)`); `Brief belongsToMany Competence
+  withPivot('level_id')`.
+- ADD `pass1_competence_results` (migration `100010`, keyed run+competence,
+  `unique`): `level_id`, `ai_rollup_status` (hedged, DEFAULT `à vérifier`),
+  `confidence` (decimal 4,3), `probe_questions` (json), `raw_json`,
+  `operator_status`/`operator_note`/`finalized_at` + `finalVerdict()`. This is the
+  competence rollup AND the single operator finalization point. `Run hasMany
+  pass1CompetenceResults`.
+- MODIFY `drafts` → AI-ONLY: `ai_status` hedged values (`à vérifier` /
+  `semble valide` / `semble non valide`); DROP `operator_status`/`operator_note`/
+  `finalized_at` + `Draft::finalVerdict()`.
+- MODIFY `evidence` → Pass-1-native: `check_id`/`kind`/`status` nullable (LLM
+  citation is `{file, line, note→message}`; runner output stays in
+  `runner_report_json`).
+
+**Hard rules:** R1 (model emits only `semble…`/`à vérifier`; `finalVerdict()`
+guard now on `Pass1CompetenceResult`; `à vérifier` safe default; no-evidence
+criterion stays `à vérifier`). R3 (blind, criterion grain; evidence vs probe_flags
+separate; rollup is not a re-grade). R4 (no identity/persona on `kind`,
+`brief_competence`, or `pass1_competence_results`; path stays →run→student_repo).
+R2/R5 untouched. **Sandbox/security: NONE** — `apps/web` schema only; v0
+trusted-repos deferral stands.
+
+**Test results:** `DomainSchemaTest` 34/34; full suite 41/41 green (incl. the slow
+`RepoIntakeServiceTest` — no regression). MySQL `migrate:fresh` clean, both new
+tables ordered correctly (`100009`, `100010`).
+
+**Archive + spec sync + Purpose/title fix (this closeout):**
+- First `openspec archive` ABORTED: the Draft MODIFIED header had been renamed
+  ("AI per-criterion assessment") so it didn't match the canonical header
+  ("AI draft vs operator-finalized…"). **Lesson (for next time): MODIFIED matches
+  by exact header text — you cannot rename a requirement via MODIFIED.** Fix used:
+  set the delta's MODIFIED header to the canonical text verbatim (so the body
+  applies), then rename the canonical title BY HAND during the Purpose step.
+- Re-ran `openspec archive pass1-schema -y` → **+2 added** (Brief assessment scope,
+  Pass1CompetenceResult), **~5 modified** (Competence, Run, Evidence, Draft,
+  factories); archived to `2026-06-25-pass1-schema`.
+- Hand-fixed canonical `domain-model/spec.md`: rewrote `## Purpose` (drafts AI-only;
+  finalization at competence grain on `pass1_competence_results`; `kind`
+  technical-only scope; brief target-level pivot) and the R1 bullet; renamed the
+  Draft requirement title to "AI-only per-criterion assessment". Grep-verified zero
+  `operator-finalized` / `Draft::finalVerdict` / `drafts…operator_status`. All 3
+  specs validate.
+
+**State at handoff:**
+- On `main`, in sync after this closeout push. Active `openspec/changes/` holds
+  only `archive/`. Canonical specs: `domain-model` (now 12 requirements),
+  `repo-intake` (5), `runner-cli` (8).
+- `pass1-schema` is DONE: applied, merged (PR #7 at `de8d0dc`), archived, spec
+  promoted + Purpose/title corrected, closeout pushed.
+
+**Next planned step: Change E2 — Pass 1 LLM wiring.** The schema is ready: for a
+Run+Brief, iterate `brief.competences` filtered to `kind='technique'`, and for each
+evaluate the criteria of `(competence, pivot.level_id)` in one blind LLM call;
+persist per-criterion `evidence` + `drafts` (hedged), and one
+`pass1_competence_results` row (rollup + confidence + probe_questions + raw_json).
+Output contract is in the Step 5 conversation. Inference via the opencode/zen
+`GRADER_*` env keys. The operator will review the prompt text closely before apply.
+Branch off `main` + `openspec-propose`, propose → apply → archive with the PR gate.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `pass1-schema` (E1) is
+> fully done (merged PR #7 at `de8d0dc`, archived `2026-06-25-pass1-schema`,
+> `domain-model` spec at 12 requirements, Purpose/title corrected). The schema is
+> ready for LLM Pass 1: `competences.kind` (technique-only scope), `brief_competence`
+> pivot (per-competence target level), `drafts` AI-only hedged per criterion,
+> `pass1_competence_results` rollup with the single `finalVerdict()` operator guard,
+> `evidence` Pass-1-native. Next is **E2 — the Pass 1 LLM wiring** (service, prompt,
+> JSON contract, parsing) via `opencode/zen GRADER_* env`. Branch off `main` +
+> `openspec-propose`; operator reviews the prompt closely before apply. Hard rules
+> and the v0 sandbox-deferral stand.
