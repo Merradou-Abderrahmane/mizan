@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Run;
 use App\Services\Pass1\Pass1GradingService;
 use App\Services\RepoIntakeService;
 use App\Services\RunnerCrashException;
@@ -10,11 +11,11 @@ use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
 
 /**
- * Runs the existing intake → grade path off the web request so the operator's
- * submit returns immediately (design D2). Reuses RepoIntakeService and
- * Pass1GradingService verbatim — no grading/runner logic here. The run's status
- * carries progress: (created by intake) → processing → pass1_done / pass1_partial
- * / error.
+ * Advances a pre-created `pending` run off the web request (design D2/D3): runs
+ * the structural runner into the existing run, then grades it. Reuses
+ * RepoIntakeService and Pass1GradingService verbatim — no grading/runner logic
+ * here. Owns the run lifecycle: pending → processing → pass1_done / pass1_partial
+ * / error. Persona never reaches this job (it carries only a run id) — R4.
  */
 class IntakeAndGradeRun implements ShouldQueue
 {
@@ -26,24 +27,25 @@ class IntakeAndGradeRun implements ShouldQueue
     /** Expensive live work; do not auto-retry. */
     public int $tries = 1;
 
-    public function __construct(
-        private readonly string $source,
-        private readonly int $briefId,
-        private readonly ?string $persona = null,
-        private readonly ?string $name = null,
-    ) {}
+    public function __construct(private readonly int $runId) {}
 
     public function handle(RepoIntakeService $intake, Pass1GradingService $grading): void
     {
-        try {
-            $run = $intake->intake($this->source, $this->briefId, null, $this->persona, $this->name);
-        } catch (RunnerCrashException) {
-            // intake already persisted an 'error' run for the crashed runner;
-            // there is nothing to grade. The run is visible in the panel as error.
+        $run = Run::find($this->runId);
+        if ($run === null) {
             return;
         }
 
         $run->update(['status' => 'processing']);
+
+        try {
+            $intake->intakeIntoRun($run);
+        } catch (RunnerCrashException) {
+            // intakeIntoRun persisted the error report; mark the run errored.
+            $run->update(['status' => 'error']);
+
+            return;
+        }
 
         try {
             $outcomes = $grading->grade($run);

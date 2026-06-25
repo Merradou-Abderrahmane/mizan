@@ -4,6 +4,8 @@ namespace App\Livewire\Runs;
 
 use App\Jobs\IntakeAndGradeRun;
 use App\Models\Brief;
+use App\Models\Run;
+use App\Models\StudentRepo;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -32,18 +34,36 @@ class Create extends Component
     {
         $this->validate();
 
-        // Async (design D2): the heavy runner + LLM work runs on the queue; the
-        // submit returns immediately. Persona is handed to intake exactly as the
-        // repo:intake command does — it lands only on StudentRepo (R4).
-        IntakeAndGradeRun::dispatch(
-            source: trim($this->source),
-            briefId: (int) $this->brief_id,
-            persona: $this->persona !== '' ? $this->persona : null,
-        );
+        $source = trim($this->source);
 
-        session()->flash('status', 'Run started — it will appear in the list once intake completes.');
+        // Pre-create the run synchronously so it shows immediately as `pending`
+        // (design D3). Persona lands ONLY on StudentRepo here and is never passed
+        // to the job/runner/prompt (R4) — the job carries just the run id.
+        $studentRepo = StudentRepo::create([
+            'name' => $this->deriveName($source),
+            'clone_path' => $source,
+            'operator_persona' => $this->persona !== '' ? $this->persona : null,
+        ]);
 
-        return $this->redirect(route('runs.index'), navigate: true);
+        $run = Run::create([
+            'student_repo_id' => $studentRepo->id,
+            'brief_id' => (int) $this->brief_id,
+            'status' => 'pending',
+        ]);
+
+        IntakeAndGradeRun::dispatch($run->id);
+
+        session()->flash('status', 'Run launched — grading in progress.');
+
+        return $this->redirect(route('runs.show', $run), navigate: true);
+    }
+
+    private function deriveName(string $source): string
+    {
+        $base = basename(rtrim(str_replace('\\', '/', $source), '/'));
+        $base = preg_replace('/\.git$/', '', $base) ?? $base;
+
+        return $base !== '' ? $base : 'run';
     }
 
     public function render()
