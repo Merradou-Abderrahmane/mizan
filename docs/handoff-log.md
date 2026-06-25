@@ -1000,3 +1000,32 @@ flake (>60s under CPU contention) — **5/5 green in isolation (65s)**, no regre
 **Next step:** open PR for review/merge; then `openspec archive operator-panel-ui -y` +
 Purpose fix + closeout push. After that the natural follow-ons: Pass 2 (probe flags), a
 student-facing export, or the operator's first real graded run (post egress sign-off).
+
+---
+
+## 2026-06-25 — Operational prerequisites for a live Pass 1 run (gotchas)
+
+Two operational gotchas a future session MUST know before (or while) running the
+panel against a real student repo. Neither is a code bug — both are environment/
+process preconditions that silently leave a run looking "stuck" or "ungraded".
+
+1. **The queue worker must be running.** Since `operator-panel-ui`,
+   `QUEUE_CONNECTION=database`. A run launched from the panel (or any
+   `IntakeAndGradeRun` dispatch) only advances past **`processing`** while
+   **`php artisan queue:work`** is running. With no worker the job sits in the
+   `jobs` table and the run stays `processing` indefinitely (recoverable,
+   non-corrupting — each competence persists in its own transaction; a throwing
+   job lands in `failed_jobs`). Symptom: run stuck at `processing`, no
+   evidence/drafts/rollup appearing → check the worker is up.
+
+2. **The first real `pass1:grade` needs the operator's explicit glm-5.2
+   zero-retention sign-off.** The panel can TRIGGER a live grade (a real
+   `glm-5.2` call via opencode/zen), but the egress go-live gate still stands:
+   the operator must confirm `GRADER_MODEL` (`glm-5.2`) is on zen's
+   zero-retention / no-training path before the first live run. Docs (fetched
+   2026-06-25) say paid models are zero-retention by default and glm-5.2 is not
+   in the listed exceptions; residuals to confirm: glm-5.2 is the *paid* zen
+   model, US-only residency acceptable, docs are a representation not a signed
+   DPA. `GRADER_MODEL` is config so a verified model can be pinned. This gate
+   blocks only the FIRST live run — never the build, tests, or merges. Nothing
+   auto-runs; a live call only happens on the operator's explicit action.
