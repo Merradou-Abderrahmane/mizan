@@ -6,13 +6,14 @@ use Database\Factories\CompetenceFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Competence extends Model
 {
     /** @use HasFactory<CompetenceFactory> */
     use HasFactory;
 
-    protected $fillable = ['referentiel_id', 'level_id', 'code', 'label', 'description'];
+    protected $fillable = ['referentiel_id', 'code', 'label', 'description'];
 
     /**
      * @return BelongsTo<Referentiel, $this>
@@ -23,10 +24,13 @@ class Competence extends Model
     }
 
     /**
-     * @return BelongsTo<Level, $this>
+     * A competence spans all three progressive levels; the (competence, level)
+     * association is carried by its criteria — there is no direct level FK.
+     *
+     * @return HasMany<Criterion, $this>
      */
-    public function level(): BelongsTo
+    public function criteria(): HasMany
     {
-        return $this->belongsTo(Level::class);
+        return $this->hasMany(Criterion::class);
     }
 }

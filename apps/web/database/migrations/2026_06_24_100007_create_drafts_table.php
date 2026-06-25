@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('drafts', function (Blueprint $table) {
             $table->id();
             $table->foreignId('run_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('competence_id')->constrained()->restrictOnDelete();
+            $table->foreignId('criterion_id')->constrained('criteria')->restrictOnDelete();
             $table->string('ai_status')->default('à vérifier');
             $table->json('ai_raw_json')->nullable();
             $table->text('ai_reasoning')->nullable();

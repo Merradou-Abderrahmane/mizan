@@ -13,7 +13,7 @@ class Draft extends Model
     use HasFactory;
 
     protected $fillable = [
-        'run_id', 'competence_id',
+        'run_id', 'criterion_id',
         'ai_status', 'ai_raw_json', 'ai_reasoning',
         'operator_status', 'operator_note', 'finalized_at',
     ];
@@ -32,11 +32,11 @@ class Draft extends Model
     }
 
     /**
-     * @return BelongsTo<Competence, $this>
+     * @return BelongsTo<Criterion, $this>
      */
-    public function competence(): BelongsTo
+    public function criterion(): BelongsTo
     {
-        return $this->belongsTo(Competence::class);
+        return $this->belongsTo(Criterion::class);
     }
 
     /**

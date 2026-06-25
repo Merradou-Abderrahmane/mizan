@@ -2,7 +2,7 @@
 
 namespace Database\Factories;
 
-use App\Models\Competence;
+use App\Models\Criterion;
 use App\Models\Evidence;
 use App\Models\Run;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -16,7 +16,7 @@ class EvidenceFactory extends Factory
     {
         return [
             'run_id' => Run::factory(),
-            'competence_id' => Competence::factory(),
+            'criterion_id' => Criterion::factory(),
             'check_id' => fake()->randomElement([
                 'composer_install', 'app_boots', 'migrations_run',
                 'readme_real', 'env_not_tracked', 'git_history_real',

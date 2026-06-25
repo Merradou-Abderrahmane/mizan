@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('probe_flags', function (Blueprint $table) {
             $table->id();
             $table->foreignId('run_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('competence_id')->constrained()->restrictOnDelete();
+            $table->foreignId('criterion_id')->constrained('criteria')->restrictOnDelete();
             $table->string('kind');
             $table->json('context_payload')->nullable();
             $table->text('message')->nullable();

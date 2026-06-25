@@ -2,7 +2,7 @@
 
 namespace Database\Factories;
 
-use App\Models\Competence;
+use App\Models\Criterion;
 use App\Models\Draft;
 use App\Models\Run;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -16,7 +16,7 @@ class DraftFactory extends Factory
     {
         return [
             'run_id' => Run::factory(),
-            'competence_id' => Competence::factory(),
+            'criterion_id' => Criterion::factory(),
             'ai_status' => 'à vérifier',
             'ai_raw_json' => null,
             'ai_reasoning' => fake()->optional()->paragraph(),

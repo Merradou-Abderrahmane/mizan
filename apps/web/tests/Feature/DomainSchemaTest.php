@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Brief;
 use App\Models\Competence;
+use App\Models\Criterion;
 use App\Models\Draft;
 use App\Models\Evidence;
 use App\Models\Level;
@@ -11,6 +12,7 @@ use App\Models\ProbeFlag;
 use App\Models\Referentiel;
 use App\Models\Run;
 use App\Models\StudentRepo;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -51,14 +53,28 @@ class DomainSchemaTest extends TestCase
         );
     }
 
+    public function test_pass1_tables_key_on_criterion_not_competence(): void
+    {
+        foreach (['evidence', 'drafts', 'probe_flags'] as $table) {
+            $this->assertTrue(
+                Schema::hasColumn($table, 'criterion_id'),
+                "$table must key on criterion_id (the evaluable unit is the criterion)."
+            );
+            $this->assertFalse(
+                Schema::hasColumn($table, 'competence_id'),
+                "$table must NOT have a competence_id column — criterion_id is the single grain key; competence is reachable via criterion."
+            );
+        }
+    }
+
     public function test_drafts_ai_status_defaults_to_a_verifier_on_raw_insert_r1(): void
     {
         $run = Run::factory()->create();
-        $competence = Competence::factory()->create();
+        $criterion = Criterion::factory()->create();
 
         DB::table('drafts')->insert([
             'run_id' => $run->id,
-            'competence_id' => $competence->id,
+            'criterion_id' => $criterion->id,
             'updated_at' => now(),
             'created_at' => now(),
         ]);
@@ -120,24 +136,82 @@ class DomainSchemaTest extends TestCase
         $this->assertCount(1, $referentiel->fresh()->briefs);
     }
 
-    public function test_competence_belongs_to_referentiel_and_optionally_level(): void
+    public function test_competence_belongs_to_referentiel_and_has_no_level_fk(): void
     {
         $referentiel = Referentiel::factory()->create();
+        $competence = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+
+        $this->assertSame($referentiel->id, $competence->referentiel->id);
+
+        $this->assertFalse(
+            Schema::hasColumn('competences', 'level_id'),
+            'A competence spans all three levels via its criteria; it must not have a direct level_id FK.'
+        );
+        $this->assertFalse(
+            method_exists($competence, 'level'),
+            'Competence must not expose a level() relation — levels are reached through criteria.'
+        );
+    }
+
+    public function test_criterion_belongs_to_a_competence_level_pair(): void
+    {
+        $referentiel = Referentiel::factory()->create();
+        $competence = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
         $level = Level::factory()->create(['referentiel_id' => $referentiel->id]);
-        $competence = Competence::factory()->create([
-            'referentiel_id' => $referentiel->id,
+
+        $criterion = Criterion::factory()->create([
+            'competence_id' => $competence->id,
             'level_id' => $level->id,
         ]);
 
-        $this->assertSame($referentiel->id, $competence->referentiel->id);
-        $this->assertSame($level->id, $competence->level->id);
+        $this->assertSame($competence->id, $criterion->competence->id);
+        $this->assertSame($level->id, $criterion->level->id);
     }
 
-    public function test_competence_without_level_returns_null(): void
+    public function test_competence_and_level_have_many_criteria(): void
     {
-        $competence = Competence::factory()->create(['level_id' => null]);
+        $referentiel = Referentiel::factory()->create();
+        $competence = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+        $level = Level::factory()->create(['referentiel_id' => $referentiel->id]);
 
-        $this->assertNull($competence->level);
+        Criterion::factory()->count(3)->create([
+            'competence_id' => $competence->id,
+            'level_id' => $level->id,
+            'code' => fn () => fake()->unique()->lexify('U???'),
+        ]);
+
+        $this->assertCount(3, $competence->fresh()->criteria);
+        $this->assertCount(3, $level->fresh()->criteria);
+    }
+
+    public function test_criterion_code_unique_within_cell_but_repeatable_across_levels(): void
+    {
+        $referentiel = Referentiel::factory()->create();
+        $competence = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n1 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n2 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+
+        Criterion::factory()->create([
+            'competence_id' => $competence->id,
+            'level_id' => $n1->id,
+            'code' => 'C1',
+        ]);
+
+        // Same code under a different level for the same competence: allowed.
+        $acrossLevel = Criterion::factory()->create([
+            'competence_id' => $competence->id,
+            'level_id' => $n2->id,
+            'code' => 'C1',
+        ]);
+        $this->assertNotNull($acrossLevel->id);
+
+        // Duplicate code within the SAME (competence, level) cell: rejected.
+        $this->expectException(QueryException::class);
+        Criterion::factory()->create([
+            'competence_id' => $competence->id,
+            'level_id' => $n1->id,
+            'code' => 'C1',
+        ]);
     }
 
     public function test_brief_belongs_to_referentiel_and_casts_payload(): void
@@ -186,43 +260,43 @@ class DomainSchemaTest extends TestCase
         $this->assertCount(1, $run->probeFlags);
     }
 
-    public function test_evidence_belongs_to_run_and_competence(): void
+    public function test_evidence_belongs_to_run_and_criterion(): void
     {
         $run = Run::factory()->create();
-        $competence = Competence::factory()->create();
+        $criterion = Criterion::factory()->create();
         $evidence = Evidence::factory()->create([
             'run_id' => $run->id,
-            'competence_id' => $competence->id,
+            'criterion_id' => $criterion->id,
         ]);
 
         $this->assertSame($run->id, $evidence->run->id);
-        $this->assertSame($competence->id, $evidence->competence->id);
+        $this->assertSame($criterion->id, $evidence->criterion->id);
     }
 
-    public function test_draft_belongs_to_run_and_competence(): void
+    public function test_draft_belongs_to_run_and_criterion(): void
     {
         $run = Run::factory()->create();
-        $competence = Competence::factory()->create();
+        $criterion = Criterion::factory()->create();
         $draft = Draft::factory()->create([
             'run_id' => $run->id,
-            'competence_id' => $competence->id,
+            'criterion_id' => $criterion->id,
         ]);
 
         $this->assertSame($run->id, $draft->run->id);
-        $this->assertSame($competence->id, $draft->competence->id);
+        $this->assertSame($criterion->id, $draft->criterion->id);
     }
 
-    public function test_probe_flag_belongs_to_run_and_competence(): void
+    public function test_probe_flag_belongs_to_run_and_criterion(): void
     {
         $run = Run::factory()->create();
-        $competence = Competence::factory()->create();
+        $criterion = Criterion::factory()->create();
         $flag = ProbeFlag::factory()->create([
             'run_id' => $run->id,
-            'competence_id' => $competence->id,
+            'criterion_id' => $criterion->id,
         ]);
 
         $this->assertSame($run->id, $flag->run->id);
-        $this->assertSame($competence->id, $flag->competence->id);
+        $this->assertSame($criterion->id, $flag->criterion->id);
     }
 
     public function test_run_factory_auto_creates_parent_relations(): void
@@ -233,6 +307,16 @@ class DomainSchemaTest extends TestCase
         $this->assertNotNull($run->brief_id, 'Run factory should auto-create a Brief.');
         $this->assertNotNull($run->studentRepo);
         $this->assertNotNull($run->brief);
+    }
+
+    public function test_criterion_factory_auto_creates_competence_and_level(): void
+    {
+        $criterion = Criterion::factory()->create();
+
+        $this->assertNotNull($criterion->competence_id, 'Criterion factory should auto-create a Competence.');
+        $this->assertNotNull($criterion->level_id, 'Criterion factory should auto-create a Level.');
+        $this->assertNotNull($criterion->competence);
+        $this->assertNotNull($criterion->level);
     }
 
     public function test_draft_factory_defaults_to_safe_a_verifier_state_r1(): void
@@ -249,5 +333,25 @@ class DomainSchemaTest extends TestCase
         $repo = StudentRepo::factory()->create();
 
         $this->assertNull($repo->operator_persona, 'R4: persona is operator-set, never auto-filled.');
+    }
+
+    public function test_all_ten_domain_factories_persist(): void
+    {
+        $models = [
+            Referentiel::factory()->create(),
+            Level::factory()->create(),
+            Competence::factory()->create(),
+            Criterion::factory()->create(),
+            Brief::factory()->create(),
+            StudentRepo::factory()->create(),
+            Run::factory()->create(),
+            Evidence::factory()->create(),
+            Draft::factory()->create(),
+            ProbeFlag::factory()->create(),
+        ];
+
+        foreach ($models as $model) {
+            $this->assertTrue($model->exists, get_class($model).' factory must persist a valid instance.');
+        }
     }
 }

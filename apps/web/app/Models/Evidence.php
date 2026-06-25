@@ -13,7 +13,7 @@ class Evidence extends Model
     use HasFactory;
 
     protected $fillable = [
-        'run_id', 'competence_id', 'check_id',
+        'run_id', 'criterion_id', 'check_id',
         'file_path', 'line_number', 'excerpt', 'kind', 'status', 'message',
     ];
 
@@ -26,10 +26,10 @@ class Evidence extends Model
     }
 
     /**
-     * @return BelongsTo<Competence, $this>
+     * @return BelongsTo<Criterion, $this>
      */
-    public function competence(): BelongsTo
+    public function criterion(): BelongsTo
     {
-        return $this->belongsTo(Competence::class);
+        return $this->belongsTo(Criterion::class);
     }
 }
