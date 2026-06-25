@@ -897,3 +897,106 @@ the `SystemSeeder` writes criteria descriptions inspired by the ThreadForge brie
 **One-liner to resume:**
 
 > Read `openspec/config.yaml` and `docs/handoff-log.md`. `pass1-smoke-harness` shipped (on `feat/pass1-smoke-harness` off `main`, OpenSpec validated, 74/74 tests green, migrated + seeded on live MySQL). It adds `php artisan repo:intake {source} {brief}` + an idempotent `SystemSeeder` (1 referentiel, 3 levels, 11 competences, 33 criteria, 1 ThreadForge brief, 5 target-level pivots, no persona — R4) + `storage/test-repos/` gitignored. Operator smoke-test recipe is in this log entry (clone ForgeCoreApi locally, migrate:fresh --seed, repo:intake, pass1:grade; GATE: confirm glm-5.2 zero-retention before the live run). CRITERIA TEXTS ARE FIXTURES — operator must replace SystemSeeder's criteria with the real référentiel before real evaluation. Branch merge + `openspec archive -y` + Purpose fix + closeout still pending. After that: the operator control panel UI (R1 finalization surface). Hard rules + v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-25 — Step 9: operator-panel-ui (Change F) — the operator control panel + R1 finalize surface
+
+**Change name:** `operator-panel-ui`
+**OpenSpec change folder:** `openspec/changes/operator-panel-ui/` (active; archive after PR merge)
+**Branch:** `feat/operator-panel-ui` off `main`.
+
+**Why:** Pass 1 was feature-complete at the service/command layer but reachable
+only via `php artisan` / `tinker`. There was no human surface to read the
+evidence-backed draft and **finalize** a verdict — the product's core act (R1).
+This change builds the web control panel and stands up the UI stack (the web app
+was a bare Laravel install: no Livewire, no DaisyUI).
+
+**Operator decisions captured before/while building:**
+- Aesthetics (the UI-rule pause): DaisyUI theme **`corporate` (light)**, **comfortable**
+  density, hedged-vs-final grammar = **outline+italic `semble…` vs solid `【VALIDE】`**.
+- Queue driver settled to **`database` (async)**, not `sync`: a real run is minutes
+  (runner + per-competence LLM calls); blocking the browser would time out. Job
+  boundary already existed → `.env` flip + `queue:work` worker, zero code change.
+  UI built assuming async (submit returns immediately, status updates live).
+- Two pre-apply confirmations against the actual code:
+  (1) **persona routing — confirmed**: `RepoIntakeService` routes `$operatorPersona`
+      ONLY to `StudentRepo.operator_persona`; never to `invokeRunner()` (called with
+      `$repoPath` only) nor into `Pass1Prompt` (no StudentRepo/persona param);
+      `operator_persona` is `$hidden`.
+  (2) **evidence excerpt — corrected**: the parser verifies the citation
+      `(file,line)` against the digest (phantoms dropped) but `Pass1GradingService`
+      persists only `file_path`/`line_number` + the model's `note` (→`message`);
+      `evidence.excerpt` is NULL. So the UI must NOT show the model's claim as a
+      verified excerpt. **Decision D6:** the detail screen reads the actual cited
+      source line read-only from `clone_path` (`App\Support\SourceExcerpt`) as the
+      excerpt, and shows the model's note separately, labeled "AI note". Omitted (not
+      fabricated) when the source is unavailable. No grading-path change.
+
+**What shipped (all `apps/web`, no schema/runner/grading-logic change):**
+- Stack: `composer require livewire/livewire` (→ **4.3**) + `npm i -D daisyui`
+  (→ **5.5**); `@plugin 'daisyui' { themes: corporate --default }` in
+  `resources/css/app.css`; `resources/views/layouts/app.blade.php` (navbar shell +
+  `@vite`, flash region). Removed a stale duplicate `QUEUE_CONNECTION=sync` from `.env`
+  (now `database`; `.env.example` already `database`). `jobs`/`failed_jobs` tables
+  already exist (`0001_01_01_000002`).
+- R1 grammar component `x-status-badge` (design D4): renders by the **`source` prop,
+  never the text** — AI → `badge badge-outline italic` + `i` marker (green/red NEVER
+  applied to AI); operator → solid `badge-success`/`badge-error` ONLY when finalized,
+  else a visibly-empty "not finalized" slot. `x-run-status` for the run lifecycle badge
+  (blue/grey/amber; spinner on `processing`).
+- Livewire: `Runs/Index` (table + `N/M finalized` + empty state + `wire:poll.5s`),
+  `Runs/Create` (brief select + repo source + persona; dispatches the job and redirects
+  immediately with a flash; `exists:briefs,id` validation; local-path-vs-URL guidance),
+  `Runs/Show` (header w/ persona as operator-private badge, collapsed runner report,
+  per-competence cards: hedged AI rollup + confidence + probe questions; per criterion:
+  hedged AI draft + reasoning + evidence as verified `file:line` + real source excerpt +
+  attributed AI note), `Runs/CompetenceFinalize` child (verdict radio w/ no preselect,
+  note, finalize → writes operator cols only; reopen → nulls them; never touches AI cols).
+- `app/Jobs/IntakeAndGradeRun` (queued, `timeout=600`, `tries=1`): calls
+  `RepoIntakeService::intake()` then `Pass1GradingService::grade()` verbatim, driving
+  `runs.status` (created by intake → `processing` → `pass1_done`/`pass1_partial`/`error`).
+- `app/Support/SourceExcerpt` (read-only single-line reader w/ path-traversal guard).
+
+**Architecture note (flagged to operator for PR review):** `RepoIntakeService::intake()`
+creates the `Run` itself (after the ~20s runner step), so to honor the "no service edit"
+promise the job calls intake()+grade() and the lifecycle shown is
+`processing → done/partial/error` (the row appears once intake registers it; submit is
+non-blocking). A literal persisted `pending` pre-row would need a small service addition —
+deferred as an optional follow-up.
+
+**Hard rules:** R1 (the finalize screen IS the enforcement surface — AI always hedged &
+visually non-authoritative; solid verdict operator-only & gated on `finalized_at`; no
+auto-accept / no preselect; `finalVerdict()` null until finalized; service writes operator
+cols only). R3 (panel only displays Pass 1 + finalizes — never re-grades; transversal
+competences never appear as cards; excerpt is verified source, not the model's claim).
+R4 (persona shown only in the operator panel; never into runner/prompt — verified).
+R5 (thin Livewire over existing services; DaisyUI components). R2 untouched.
+
+**Sandbox/security boundary:** NOT touched directly. The panel becomes a *trigger* for two
+existing privileged ops (runner subprocess via `repo:intake`, live LLM via `pass1:grade`).
+The **egress go-live gate still stands**: a UI-triggered grade is a real `glm-5.2` call and
+still needs the operator's zero-retention sign-off before first live use. Nothing auto-runs.
+
+**Operational note — the worker:** with `QUEUE_CONNECTION=database` a launched run only
+advances when **`php artisan queue:work`** is running. Without it the run sticks at
+`processing` (recoverable, non-corrupting — each competence persists in its own
+transaction). A throwing job lands in `failed_jobs`.
+
+**Test results:** `php artisan test --exclude-group=slow` → **88 passed** (347 assertions).
+New: `StatusBadgeR1Test` 5/5 + `OperatorPanelTest` 11/11 (16 new, no live HTTP — `Bus::fake`).
+Fixed the stock `ExampleTest` (now `/` = runs list → needs `RefreshDatabase`). The 2
+`RepoIntakeServiceTest` errors in the combined run are the documented real-runner timeout
+flake (>60s under CPU contention) — **5/5 green in isolation (65s)**, no regression.
+`npm run build` green (DaisyUI corporate compiled). Grep-verified `badge-success`/
+`badge-error` never on an AI path (only operator verdict / runner checks / run-status).
+
+**State at handoff:** on `feat/operator-panel-ui` off `main`. Active change folder validated
+(`openspec validate operator-panel-ui --strict` ✓). New canonical capability `operator-panel`
+(6 requirements) lands at archive time. Canonical specs on `main` unchanged until then:
+`domain-model` (12), `pass1-grading` (10), `repo-intake` (5), `runner-cli` (8),
+`pass1-smoke-harness` (3).
+
+**Next step:** open PR for review/merge; then `openspec archive operator-panel-ui -y` +
+Purpose fix + closeout push. After that the natural follow-ons: Pass 2 (probe flags), a
+student-facing export, or the operator's first real graded run (post egress sign-off).
