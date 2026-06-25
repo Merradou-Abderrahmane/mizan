@@ -204,7 +204,7 @@ class OperatorPanelTest extends TestCase
         $this->assertSame('semble valide', $result->ai_rollup_status);
     }
 
-    public function test_create_dispatches_job_and_redirects_without_blocking(): void
+    public function test_create_makes_pending_run_dispatches_and_redirects_to_detail(): void
     {
         Bus::fake();
         $referentiel = Referentiel::factory()->create();
@@ -214,13 +214,18 @@ class OperatorPanelTest extends TestCase
             ->set('brief_id', $brief->id)
             ->set('source', 'storage/test-repos/ForgeCoreApi')
             ->set('persona', 'N2 adapter')
-            ->call('submit')
-            ->assertRedirect(route('runs.index'));
+            ->call('submit');
+
+        $run = Run::firstOrFail();
+        $this->assertSame('pending', $run->status);
+        $this->assertSame($brief->id, $run->brief_id);
+        // Persona lands only on StudentRepo (R4); never passed to the job.
+        $this->assertSame('N2 adapter', $run->studentRepo->operator_persona);
 
         Bus::assertDispatched(IntakeAndGradeRun::class);
     }
 
-    public function test_create_rejects_unknown_brief(): void
+    public function test_create_rejects_unknown_brief_and_creates_no_run(): void
     {
         Bus::fake();
 
@@ -230,6 +235,7 @@ class OperatorPanelTest extends TestCase
             ->call('submit')
             ->assertHasErrors(['brief_id']);
 
+        $this->assertSame(0, Run::count());
         Bus::assertNotDispatched(IntakeAndGradeRun::class);
     }
 }

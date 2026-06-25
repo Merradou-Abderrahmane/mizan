@@ -21,43 +21,91 @@ class RepoIntakeService
     ): Run {
         $brief = Brief::findOrFail($briefId);
 
-        $isUrl = $this->isUrl($source);
+        try {
+            $report = $this->runRunnerOnSource($source);
+        } catch (RunnerCrashException $e) {
+            DB::transaction(function () use ($source, $brief, $studentRepoId, $operatorPersona, $name, $e) {
+                $studentRepo = $this->resolveStudentRepo($source, $studentRepoId, $operatorPersona, $name);
+                $this->createRun($studentRepo, $brief, $this->crashReport($e));
+            });
+
+            throw $e;
+        }
+
+        return DB::transaction(function () use ($source, $brief, $studentRepoId, $operatorPersona, $name, $report) {
+            $studentRepo = $this->resolveStudentRepo($source, $studentRepoId, $operatorPersona, $name);
+
+            return $this->createRun($studentRepo, $brief, $report);
+        });
+    }
+
+    /**
+     * Run the structural runner against an ALREADY-persisted (pending) run and
+     * fill in its runner report. The UI pre-creates the run + its StudentRepo so
+     * it shows immediately as `pending`; this populates the report. It does NOT
+     * set run.status — the caller (the queue job) owns the
+     * pending → processing → terminal lifecycle.
+     */
+    public function intakeIntoRun(Run $run): Run
+    {
+        $source = $run->studentRepo->clone_path;
+
+        try {
+            $report = $this->runRunnerOnSource($source);
+        } catch (RunnerCrashException $e) {
+            $run->update([
+                'runner_report_json' => $this->crashReport($e),
+                'ended_at' => now(),
+            ]);
+
+            throw $e;
+        }
+
+        $run->update([
+            'runner_report_json' => $report,
+            'started_at' => $report['started_at'] ?? null,
+            'ended_at' => $report['ended_at'] ?? null,
+        ]);
+
+        return $run;
+    }
+
+    /**
+     * Clone (when a URL) and run the structural runner, always cleaning up the
+     * temp clone. Returns the decoded report or throws RunnerCrashException.
+     * Protected so a test can substitute the runner without a subprocess.
+     *
+     * @return array<string, mixed>
+     */
+    protected function runRunnerOnSource(string $source): array
+    {
         $cloneDir = null;
 
         try {
-            $repoPath = $isUrl
+            $repoPath = $this->isUrl($source)
                 ? ($cloneDir = $this->cloneToTemp($source))
                 : $source;
 
-            try {
-                $report = $this->invokeRunner($repoPath);
-            } catch (RunnerCrashException $e) {
-                DB::transaction(function () use ($source, $brief, $studentRepoId, $operatorPersona, $name, $e) {
-                    $studentRepo = $this->resolveStudentRepo($source, $studentRepoId, $operatorPersona, $name);
-                    $this->createRun($studentRepo, $brief, [
-                        'status' => 'error',
-                        'runner_version' => null,
-                        'repo_path' => $e->repoPath,
-                        'started_at' => null,
-                        'ended_at' => now()->toIso8601String(),
-                        'checks' => [],
-                        'raw_stdout' => $e->rawStdout,
-                    ]);
-                });
-
-                throw $e;
-            }
-
-            return DB::transaction(function () use ($source, $brief, $studentRepoId, $operatorPersona, $name, $report) {
-                $studentRepo = $this->resolveStudentRepo($source, $studentRepoId, $operatorPersona, $name);
-
-                return $this->createRun($studentRepo, $brief, $report);
-            });
+            return $this->invokeRunner($repoPath);
         } finally {
             if ($cloneDir !== null) {
                 $this->deleteDirectory($cloneDir);
             }
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function crashReport(RunnerCrashException $e): array
+    {
+        return [
+            'status' => 'error',
+            'runner_version' => null,
+            'repo_path' => $e->repoPath,
+            'started_at' => null,
+            'ended_at' => now()->toIso8601String(),
+            'checks' => [],
+            'raw_stdout' => $e->rawStdout,
+        ];
     }
 
     private function isUrl(string $source): bool
@@ -68,7 +116,7 @@ class RepoIntakeService
 
     private function cloneToTemp(string $url): string
     {
-        $cloneDir = storage_path('runner-clones/' . Str::uuid()->toString());
+        $cloneDir = storage_path('runner-clones/'.Str::uuid()->toString());
 
         if (! is_dir(dirname($cloneDir)) && ! mkdir(dirname($cloneDir), 0755, true)) {
             throw new \RuntimeException("Failed to create clone parent directory: {$cloneDir}");
@@ -87,14 +135,14 @@ class RepoIntakeService
     private function invokeRunner(string $repoPath): array
     {
         $monorepoRoot = dirname(base_path(), 2);
-        $runnerBin = $monorepoRoot . '/apps/runner/bin/runner';
+        $runnerBin = $monorepoRoot.'/apps/runner/bin/runner';
         $process = new Process(['php', $runnerBin, $repoPath]);
         $process->run();
 
         $stdout = $process->getOutput();
         $report = json_decode($stdout, true);
 
-        if (JSON_ERROR_NONE !== json_last_error() || ! is_array($report)) {
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($report)) {
             throw new RunnerCrashException($stdout, $repoPath);
         }
 
@@ -155,7 +203,7 @@ class RepoIntakeService
         $items = array_diff(scandir($dir) ?: [], ['.', '..']);
 
         foreach ($items as $item) {
-            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            $path = $dir.DIRECTORY_SEPARATOR.$item;
             if (is_dir($path)) {
                 $this->deleteDirectory($path);
             } else {
