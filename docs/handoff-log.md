@@ -241,9 +241,9 @@ with a new feature branch + `openspec-propose`, continuing the propose → apply
 ## 2026-06-24 — Step 3: repo-intake (Change C)
 
 **Change name:** `repo-intake`
-**OpenSpec change folder:** `openspec/changes/repo-intake/`
-**Branch:** `feat/change-c-repo-intake` — PR against `main` (NOT merged by the
-session; operator reviews and merges).
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-repo-intake/`
+**Branch:** `feat/change-c-repo-intake` — merged to `main` via PR #5 at
+`9b2167c`, then archived + spec synced.
 
 **What happened:**
 - Proposed via `openspec-propose` skill: proposal, design, specs/repo-intake,
@@ -300,15 +300,76 @@ Docker, no egress, no secrets. Cloning is under the v0 "trusted operator repos
 on local Laragon host" constraint. Sandbox hardening stays deferred to
 `change/runner-sandbox` (requires human review).
 
-**Next planned step:** Archive `repo-intake` after the operator merges the PR,
-then proceed to the next change in the 2026-06-24 sequencing (likely the LLM
-Pass 1 wiring or the web UI for run orchestration).
+**Next planned step:** See the Step 3 closeout section below.
 
 **One-liner to resume:**
 
-> Read `openspec/config.yaml` and `docs/handoff-log.md`. `repo-intake` is
-> implemented on `feat/change-c-repo-intake` with a PR open against `main`
-> (26/26 tests green, R2/R3/R4 respected, Option X — no Evidence rows, no
-> `domain-model` modification). The operator reviews and merges. After merge,
-> archive the change and proceed to the next change (LLM Pass 1 wiring or
-> web UI orchestration). Hard rules and the v0 sandbox-deferral stand.
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `repo-intake` is fully
+> done (applied, merged via PR #5 at `9b2167c`, archived at
+> `2026-06-25-repo-intake`, spec promoted to `openspec/specs/repo-intake`,
+> closeout pushed to `main`). 26/26 tests green, R2/R3/R4 respected, Option X
+> — no Evidence rows, no `domain-model` modification. Branch off `main` and
+> propose the next change (LLM Pass 1 wiring or web UI run orchestration) via
+> `openspec-propose`, continuing the propose → apply → archive loop with the
+> branch + PR gate. Hard rules and the v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-25 — Step 3 closeout: archive + sync + merge to main
+
+Session (OpenCode / GLM) that picked up immediately after the operator merged
+PR #5. No new feature code — this was the OpenSpec closeout loop for
+`repo-intake`.
+
+**What happened:**
+- Ran `openspec archive repo-intake -y`. This did TWO things in one
+  authoritative step: (1) **synced** the delta spec into the canonical spec at
+  `openspec/specs/repo-intake/spec.md` (created it — `repo-intake: create`, 5
+  requirements added), and (2) **archived** the change folder to
+  `openspec/changes/archive/2026-06-25-repo-intake/`.
+  - Note for next session (already known from Steps 1 & 2 closeouts, confirmed
+    again): archiving is NOT a verbatim file move. The delta uses
+    `## ADDED Requirements` headers; the CLI transforms it into the canonical
+    `## Purpose` + `## Requirements` shape. Don't hand-write canonical specs —
+    let `openspec archive` (or `openspec-sync-specs`) do it.
+- `openspec archive` leaves the Purpose as a `TBD` placeholder. Replaced it
+  with a real Purpose tying the spec to R2 (runner called as-is), R3 (zero
+  Evidence rows — runner results in the blob only; per-competence Evidence is
+  the LLM Pass 1 output, a later change), R4 (operator_persona hidden, never
+  in the subprocess), and R5 (boring). Also records the Option X decision and
+  the YAGNI deferral of a `check_results` table. `openspec validate
+  repo-intake --specs` → ✓ passes (along with `domain-model` and `runner-cli`).
+- Merged to `main`: the feature branch `feat/change-c-repo-intake` was merged
+  via GitHub PR #5 → `9b2167c`. Local `main` fast-forwarded
+  `2d80281..9b2167c`. Feature branch deleted both locally and on `origin`.
+
+**State at handoff:**
+- On `main`, clean, in sync with `origin/main` at `9b2167c` (will advance by
+  one commit after this closeout is pushed).
+- `openspec/changes/` active folder holds only `archive/`. No active changes.
+- `openspec/specs/repo-intake/spec.md` is the canonical, validated spec.
+- Canonical specs on `main`: `domain-model` (9 requirements) +
+  `repo-intake` (5 requirements) + `runner-cli` (8 requirements).
+- `repo-intake` is DONE: applied, merged (PR #5 at `9b2167c`), archived, spec
+  promoted, closeout pushed.
+
+**Next planned step:**
+Per the 2026-06-24 sequencing, the next change is the LLM Pass 1 wiring or the
+web UI for run orchestration (operator can create a Run from a Brief +
+StudentRepo via `RepoIntakeService::intake(...)`, view the run status +
+`runner_report_json`, and eventually trigger the LLM Pass 1 against it). Start
+fresh from `main` with a new feature branch + `openspec-propose`, continuing
+the propose → apply → archive loop with the real branch + PR gate (as done for
+Changes B and C).
+
+**One-liner to resume (next session):**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `repo-intake` is fully
+> done (applied, merged via PR #5 at `9b2167c`, archived at
+> `2026-06-25-repo-intake`, spec promoted to `openspec/specs/repo-intake`,
+> closeout pushed to `main`). 26/26 tests green, R2/R3/R4 respected, Option X
+> — no Evidence rows, no `domain-model` modification. Three canonical specs on
+> `main`: `domain-model`, `repo-intake`, `runner-cli`. Branch off `main` and
+> propose the next change (LLM Pass 1 wiring or web UI run orchestration) via
+> `openspec-propose`, continuing the propose → apply → archive loop with the
+> branch + PR gate. Hard rules and the v0 sandbox-deferral stand.
