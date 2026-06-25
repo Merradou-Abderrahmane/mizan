@@ -12,7 +12,8 @@ context: |
     (single user). Orchestrates runs, shows drafts, lets operator edit + finalize.
   - apps/runner: containerized PHP worker. Executes UNTRUSTED student code.
   - DB: MySQL (Laragon, local). Queue: sync now; Horizon/Redis later.
-  - Inference: Anthropic API via metered key. NEVER a chat subscription.
+  - Inference: metered LLM API key (opencode/zen gateway — GLM/Qwen models).
+    Pay-per-token, NEVER a chat subscription.
 
   HARD RULES (violating these is a defect, not a style choice):
   R1. The LLM NEVER emits a final verdict. Deterministic checks + LLM produce
