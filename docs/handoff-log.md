@@ -373,3 +373,42 @@ Changes B and C).
 > propose the next change (LLM Pass 1 wiring or web UI run orchestration) via
 > `openspec-propose`, continuing the propose → apply → archive loop with the
 > branch + PR gate. Hard rules and the v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-25 — Prep: grader env scaffolding + inference-provider correction
+
+Small, direct-to-`main` prep commit (no feature, no OpenSpec change) ahead of
+the next change (the LLM grading feature). Committed straight to `main` per
+operator instruction — no branch/PR, because it only touches config/example
+scaffolding and ships no secret.
+
+**What changed:**
+- `apps/web/.env.example` — added four `GRADER_*` keys defining the LLM grader's
+  connection shape for the upcoming feature: `GRADER_BASE_URL`
+  (`https://opencode.ai/zen/v1`), `GRADER_API_KEY` (empty — no secret
+  committed), `GRADER_MODEL` (`glm-5.2`), `GRADER_FALLBACK_MODEL`
+  (`qwen3.6-plus`). Also fixed the missing trailing newline.
+- `openspec/config.yaml` — corrected the inference line. It previously read
+  "Anthropic API via metered key. NEVER a chat subscription." Reality changed:
+  inference now goes through the **opencode/zen gateway (GLM/Qwen models)**. The
+  governing principle is unchanged — **metered, pay-per-token key, NEVER a chat
+  subscription** — only the provider name was updated so a fresh session reading
+  config doesn't see a contradiction against the new `GRADER_*` env keys.
+
+**Why config too, not just the log:** `config.yaml` is the per-session source of
+truth (every session starts by reading it); the handoff log is append-only
+history. Leaving line 15 saying "Anthropic API" while `.env.example` ships
+opencode/zen keys would mislead the next session about which provider is
+authoritative.
+
+**Hard rules:** none touched. R1–R5 stand. The "metered key, never a chat
+subscription" intent behind the inference line is preserved. Sandbox boundary
+untouched; v0 trusted-repos deferral stands.
+
+**State:** on `main`, direct commit + push. No active OpenSpec changes. Three
+canonical specs unchanged: `domain-model`, `repo-intake`, `runner-cli`.
+
+**Next planned step is UNCHANGED:** the next change is the LLM grading feature
+(Pass 1 wiring) or the web UI run orchestration — the operator will name it next
+and we branch off `main` + `openspec-propose` as usual.
