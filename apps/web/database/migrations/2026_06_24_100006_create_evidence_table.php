@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('evidence', function (Blueprint $table) {
             $table->id();
             $table->foreignId('run_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('competence_id')->constrained()->restrictOnDelete();
+            $table->foreignId('criterion_id')->constrained('criteria')->restrictOnDelete();
             $table->string('check_id');
             $table->string('file_path')->nullable();
             $table->integer('line_number')->nullable();

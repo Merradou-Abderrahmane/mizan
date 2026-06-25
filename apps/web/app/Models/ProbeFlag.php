@@ -12,7 +12,7 @@ class ProbeFlag extends Model
     /** @use HasFactory<ProbeFlagFactory> */
     use HasFactory;
 
-    protected $fillable = ['run_id', 'competence_id', 'kind', 'context_payload', 'message'];
+    protected $fillable = ['run_id', 'criterion_id', 'kind', 'context_payload', 'message'];
 
     protected $casts = [
         'context_payload' => 'array',
@@ -27,10 +27,10 @@ class ProbeFlag extends Model
     }
 
     /**
-     * @return BelongsTo<Competence, $this>
+     * @return BelongsTo<Criterion, $this>
      */
-    public function competence(): BelongsTo
+    public function criterion(): BelongsTo
     {
-        return $this->belongsTo(Competence::class);
+        return $this->belongsTo(Criterion::class);
     }
 }
