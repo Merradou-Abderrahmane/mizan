@@ -18,6 +18,12 @@ class CompetenceFactory extends Factory
             'code' => fake()->lexify('C???'),
             'label' => fake()->words(3, true),
             'description' => fake()->paragraph(),
+            'kind' => 'transversale',
         ];
+    }
+
+    public function technical(): static
+    {
+        return $this->state(fn (array $attributes) => ['kind' => 'technique']);
     }
 }

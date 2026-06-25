@@ -8,6 +8,7 @@ use App\Models\Criterion;
 use App\Models\Draft;
 use App\Models\Evidence;
 use App\Models\Level;
+use App\Models\Pass1CompetenceResult;
 use App\Models\ProbeFlag;
 use App\Models\Referentiel;
 use App\Models\Run;
@@ -81,9 +82,7 @@ class DomainSchemaTest extends TestCase
 
         $draft = Draft::first();
 
-        $this->assertSame('à vérifier', $draft->ai_status, 'R1: ai_status must default to "à vérifier", never "valide".');
-        $this->assertNull($draft->operator_status, 'R1: operator_status must be null until the operator finalizes.');
-        $this->assertNull($draft->finalized_at, 'R1: finalized_at must be null until the operator finalizes.');
+        $this->assertSame('à vérifier', $draft->ai_status, 'R1: ai_status must default to "à vérifier", never a bare verdict.');
     }
 
     public function test_student_repo_serialization_omits_operator_persona_r4(): void
@@ -99,29 +98,101 @@ class DomainSchemaTest extends TestCase
         );
     }
 
-    public function test_draft_final_verdict_returns_null_when_un_finalized_r1(): void
+    public function test_drafts_is_ai_only_no_operator_finalization_columns(): void
     {
-        $draft = Draft::factory()->create([
-            'ai_status' => 'valide',
+        // Finalization is competence-grain (pass1_competence_results); drafts hold
+        // only the AI's per-criterion hedged assessment.
+        foreach (['operator_status', 'operator_note', 'finalized_at'] as $column) {
+            $this->assertFalse(
+                Schema::hasColumn('drafts', $column),
+                "drafts must be AI-only: no $column column (operator finalizes at competence grain)."
+            );
+        }
+
+        $this->assertFalse(
+            method_exists(Draft::class, 'finalVerdict'),
+            'Draft must not expose finalVerdict() — finalization lives on Pass1CompetenceResult.'
+        );
+    }
+
+    public function test_pass1_result_final_verdict_returns_null_when_un_finalized_r1(): void
+    {
+        $result = Pass1CompetenceResult::factory()->create([
+            'ai_rollup_status' => 'semble valide',
             'operator_status' => null,
             'finalized_at' => null,
         ]);
 
         $this->assertNull(
-            $draft->finalVerdict(),
-            'R1: an un-finalized draft must never be readable as a final verdict, even if ai_status is "valide".'
+            $result->finalVerdict(),
+            'R1: an un-finalized result must never be readable as a final verdict, even if the AI rollup is "semble valide".'
         );
     }
 
-    public function test_draft_final_verdict_returns_operator_value_when_finalized_r1(): void
+    public function test_pass1_result_final_verdict_returns_operator_value_when_finalized_r1(): void
     {
-        $draft = Draft::factory()->finalized('non valide')->create();
+        $result = Pass1CompetenceResult::factory()->finalized('non valide')->create();
 
         $this->assertSame(
             'non valide',
-            $draft->finalVerdict(),
-            'R1: a finalized draft returns the operator\'s value, not the AI draft.'
+            $result->finalVerdict(),
+            'R1: a finalized result returns the operator\'s value, not the AI rollup.'
         );
+    }
+
+    public function test_pass1_result_ai_rollup_defaults_to_a_verifier_on_raw_insert_r1(): void
+    {
+        $run = Run::factory()->create();
+        $competence = Competence::factory()->create();
+        $level = Level::factory()->create();
+
+        DB::table('pass1_competence_results')->insert([
+            'run_id' => $run->id,
+            'competence_id' => $competence->id,
+            'level_id' => $level->id,
+            'updated_at' => now(),
+            'created_at' => now(),
+        ]);
+
+        $result = Pass1CompetenceResult::first();
+
+        $this->assertSame('à vérifier', $result->ai_rollup_status, 'R1: ai_rollup_status must default to "à vérifier".');
+        $this->assertNull($result->operator_status);
+        $this->assertNull($result->finalized_at);
+    }
+
+    public function test_pass1_result_has_no_student_identity_column_r4(): void
+    {
+        foreach (['operator_persona', 'student_repo_id', 'student_name'] as $column) {
+            $this->assertFalse(
+                Schema::hasColumn('pass1_competence_results', $column),
+                "R4: pass1_competence_results must not carry student identity ($column)."
+            );
+        }
+    }
+
+    public function test_run_has_many_pass1_competence_results(): void
+    {
+        $run = Run::factory()->create();
+        Pass1CompetenceResult::factory()->count(2)->create(['run_id' => $run->id]);
+
+        $this->assertCount(2, $run->fresh()->pass1CompetenceResults);
+    }
+
+    public function test_pass1_result_belongs_to_run_competence_level(): void
+    {
+        $run = Run::factory()->create();
+        $competence = Competence::factory()->create();
+        $level = Level::factory()->create();
+        $result = Pass1CompetenceResult::factory()->create([
+            'run_id' => $run->id,
+            'competence_id' => $competence->id,
+            'level_id' => $level->id,
+        ]);
+
+        $this->assertSame($run->id, $result->run->id);
+        $this->assertSame($competence->id, $result->competence->id);
+        $this->assertSame($level->id, $result->level->id);
     }
 
     public function test_referentiel_has_many_levels_competences_briefs(): void
@@ -324,8 +395,106 @@ class DomainSchemaTest extends TestCase
         $draft = Draft::factory()->create();
 
         $this->assertSame('à vérifier', $draft->ai_status);
-        $this->assertNull($draft->operator_status);
-        $this->assertNull($draft->finalized_at);
+    }
+
+    public function test_pass1_result_factory_defaults_to_safe_un_finalized_state_r1(): void
+    {
+        $result = Pass1CompetenceResult::factory()->create();
+
+        $this->assertSame('à vérifier', $result->ai_rollup_status);
+        $this->assertNull($result->operator_status);
+        $this->assertNull($result->finalized_at);
+        $this->assertNotNull($result->run_id, 'Pass1CompetenceResult factory should auto-create a Run.');
+        $this->assertNotNull($result->competence_id, 'Pass1CompetenceResult factory should auto-create a Competence.');
+        $this->assertNotNull($result->level_id, 'Pass1CompetenceResult factory should auto-create a Level.');
+    }
+
+    public function test_competence_kind_defaults_to_transversale_and_technical_scope_filters(): void
+    {
+        $referentiel = Referentiel::factory()->create();
+
+        DB::table('competences')->insert([
+            'referentiel_id' => $referentiel->id,
+            'code' => 'C1',
+            'label' => 'unset kind',
+            'updated_at' => now(),
+            'created_at' => now(),
+        ]);
+        $technical = Competence::factory()->technical()->create();
+
+        $rawInserted = Competence::where('code', 'C1')->first();
+        $this->assertSame('transversale', $rawInserted->kind, 'kind must default to transversale (safe-exclude).');
+
+        $technicalIds = Competence::technical()->pluck('id');
+        $this->assertTrue($technicalIds->contains($technical->id));
+        $this->assertFalse($technicalIds->contains($rawInserted->id), 'technical() scope must exclude transversale competences.');
+    }
+
+    public function test_brief_assesses_competences_at_per_competence_target_levels(): void
+    {
+        $referentiel = Referentiel::factory()->create();
+        $brief = Brief::factory()->create(['referentiel_id' => $referentiel->id]);
+        $compA = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+        $compB = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n1 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n2 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+
+        $brief->competences()->attach($compA->id, ['level_id' => $n1->id]);
+        $brief->competences()->attach($compB->id, ['level_id' => $n2->id]);
+
+        $brief = $brief->fresh();
+        $this->assertCount(2, $brief->competences);
+
+        $levelByCompetence = $brief->competences->mapWithKeys(
+            fn ($c) => [$c->id => $c->pivot->level_id]
+        );
+        $this->assertSame($n1->id, $levelByCompetence[$compA->id]);
+        $this->assertSame($n2->id, $levelByCompetence[$compB->id]);
+    }
+
+    public function test_brief_cannot_assess_same_competence_twice(): void
+    {
+        $referentiel = Referentiel::factory()->create();
+        $brief = Brief::factory()->create(['referentiel_id' => $referentiel->id]);
+        $comp = Competence::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n1 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+        $n2 = Level::factory()->create(['referentiel_id' => $referentiel->id]);
+
+        $brief->competences()->attach($comp->id, ['level_id' => $n1->id]);
+
+        $this->expectException(QueryException::class);
+        $brief->competences()->attach($comp->id, ['level_id' => $n2->id]);
+    }
+
+    public function test_evidence_runner_columns_are_nullable_for_llm_citations(): void
+    {
+        foreach (['check_id', 'kind', 'status'] as $column) {
+            $this->assertTrue(
+                Schema::hasColumn('evidence', $column),
+                "evidence should still have $column (kept, nullable)."
+            );
+        }
+
+        $criterion = Criterion::factory()->create();
+        $run = Run::factory()->create();
+        $evidence = Evidence::factory()->create([
+            'run_id' => $run->id,
+            'criterion_id' => $criterion->id,
+            'check_id' => null,
+            'kind' => null,
+            'status' => null,
+            'file_path' => 'app/Models/User.php',
+            'line_number' => 42,
+            'message' => 'uses Eloquent relation',
+        ]);
+
+        $reloaded = $evidence->fresh();
+        $this->assertNull($reloaded->check_id);
+        $this->assertNull($reloaded->kind);
+        $this->assertNull($reloaded->status);
+        $this->assertSame('app/Models/User.php', $reloaded->file_path);
+        $this->assertSame(42, $reloaded->line_number);
+        $this->assertSame('uses Eloquent relation', $reloaded->message);
     }
 
     public function test_student_repo_factory_defaults_persona_to_null_r4(): void
@@ -335,7 +504,7 @@ class DomainSchemaTest extends TestCase
         $this->assertNull($repo->operator_persona, 'R4: persona is operator-set, never auto-filled.');
     }
 
-    public function test_all_ten_domain_factories_persist(): void
+    public function test_all_eleven_domain_factories_persist(): void
     {
         $models = [
             Referentiel::factory()->create(),
@@ -348,6 +517,7 @@ class DomainSchemaTest extends TestCase
             Evidence::factory()->create(),
             Draft::factory()->create(),
             ProbeFlag::factory()->create(),
+            Pass1CompetenceResult::factory()->create(),
         ];
 
         foreach ($models as $model) {

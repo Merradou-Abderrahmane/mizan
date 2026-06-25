@@ -63,4 +63,12 @@ class Run extends Model
     {
         return $this->hasMany(ProbeFlag::class);
     }
+
+    /**
+     * @return HasMany<Pass1CompetenceResult, $this>
+     */
+    public function pass1CompetenceResults(): HasMany
+    {
+        return $this->hasMany(Pass1CompetenceResult::class);
+    }
 }

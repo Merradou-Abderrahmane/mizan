@@ -1,0 +1,354 @@
+## ADDED Requirements
+
+### Requirement: Brief assessment scope — Brief↔Competence target-level pivot
+The system SHALL create a `brief_competence` pivot table with columns: `id`
+(bigint, PK), `brief_id` (bigint, FK → `briefs.id`, ON DELETE CASCADE),
+`competence_id` (bigint, FK → `competences.id`, ON DELETE CASCADE),
+`level_id` (bigint, FK → `levels.id`, ON DELETE RESTRICT — the level this
+competence is assessed at for this brief), `created_at`, and `updated_at`. The
+table SHALL enforce `UNIQUE (brief_id, competence_id)` so a brief assesses a
+given competence at exactly one target level.
+
+This pivot defines, for a brief, both the assessment scope (which competences it
+covers) and the target level per competence — different competences MAY be
+assessed at different levels in one brief. The `Brief` model SHALL have a
+`belongsToMany` relation to `Competence` that exposes the pivot's `level_id`
+(`withPivot('level_id')`).
+
+#### Scenario: brief_competence table migrates cleanly
+- **GIVEN** the `briefs`, `competences`, and `levels` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `brief_competence` table SHALL exist
+- **AND** it SHALL have `brief_id`, `competence_id`, and `level_id` foreign keys
+- **AND** it SHALL enforce a unique `(brief_id, competence_id)` constraint
+
+#### Scenario: A brief assesses competences at per-competence target levels
+- **GIVEN** a `Brief` linked to competence A at level N1 and competence B at level N2
+- **WHEN** `$brief->competences` is accessed
+- **THEN** it SHALL return both competences
+- **AND** the pivot SHALL expose `level_id` so the target level for A is N1 and for B is N2
+
+#### Scenario: A competence cannot be assessed at two levels in one brief
+- **GIVEN** a `Brief` already linked to competence A at level N1
+- **WHEN** the same `(brief, competence A)` pair is inserted again at level N2
+- **THEN** the insert SHALL fail the unique `(brief_id, competence_id)` constraint
+
+### Requirement: Pass1CompetenceResult table — competence rollup + operator finalization (R1)
+The system SHALL create a `pass1_competence_results` table with columns: `id`
+(bigint, PK), `run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
+`competence_id` (bigint, FK → `competences.id`, ON DELETE RESTRICT),
+`level_id` (bigint, FK → `levels.id`, ON DELETE RESTRICT — the level assessed,
+snapshotted on the result),
+`ai_rollup_status` (string, not null, DEFAULT `'à vérifier'` — the AI's
+competence-level rollup, one of: `à vérifier`, `semble valide`,
+`semble non valide`),
+`confidence` (decimal, nullable — the model's self-reported confidence, 0..1),
+`probe_questions` (json, nullable — tiered oral questions the operator may ask;
+distinct from Pass 2 `probe_flags`),
+`raw_json` (json, nullable — the full Pass 1 LLM response for this competence,
+for audit),
+`operator_status` (string, nullable — the operator's finalized value, one of:
+`valide`, `non valide`, `à vérifier`; null until finalized),
+`operator_note` (text, nullable), `finalized_at` (timestamp, nullable),
+`created_at`, and `updated_at`. The table SHALL enforce
+`UNIQUE (run_id, competence_id)` — one Pass 1 result per competence per run.
+
+The `ai_rollup_status` column SHALL have a database-level DEFAULT of
+`'à vérifier'`, and its allowed AI values SHALL be only `à vérifier`,
+`semble valide`, or `semble non valide` — the model NEVER asserts a bare
+`valide`/`non valide` verdict (R1). The `pass1_competence_results` table SHALL
+NOT have any `operator_persona` or student-identity column (R4); a `StudentRepo`
+is reachable only via `run → student_repo`.
+
+The `Pass1CompetenceResult` model SHALL have a `belongsTo` relation to `Run`, a
+`belongsTo` relation to `Competence`, and a `belongsTo` relation to `Level`. The
+`Run` model SHALL have a `hasMany` relation to `Pass1CompetenceResult`.
+
+The `Pass1CompetenceResult` model SHALL expose a `finalVerdict(): ?string`
+accessor that returns `operator_status` if and only if `finalized_at` is
+non-null; otherwise it SHALL return null. This is the single finalization point
+for a competence: an un-finalized result can never be read as a final verdict
+(R1: "the LLM never emits a final verdict; the operator finalizes, always").
+
+#### Scenario: pass1_competence_results table migrates cleanly
+- **GIVEN** the `runs`, `competences`, and `levels` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `pass1_competence_results` table SHALL exist
+- **AND** it SHALL have `run_id`, `competence_id`, and `level_id` foreign keys
+- **AND** it SHALL enforce a unique `(run_id, competence_id)` constraint
+- **AND** it SHALL NOT have an `operator_persona` or student-identity column
+
+#### Scenario: ai_rollup_status defaults to à vérifier on raw insert (R1)
+- **GIVEN** a database insert into `pass1_competence_results` that does not specify
+  `ai_rollup_status`
+- **WHEN** the row is loaded
+- **THEN** `ai_rollup_status` SHALL equal `'à vérifier'`
+- **AND** `operator_status` SHALL be null
+- **AND** `finalized_at` SHALL be null
+
+#### Scenario: Un-finalized result returns null from finalVerdict (R1)
+- **GIVEN** a persisted `Pass1CompetenceResult` where `ai_rollup_status` is
+  `'semble valide'` but `finalized_at` is null and `operator_status` is null
+- **WHEN** `$result->finalVerdict()` is called
+- **THEN** it SHALL return null (the AI rollup is never a final verdict)
+
+#### Scenario: Finalized result returns operator's value from finalVerdict (R1)
+- **GIVEN** a persisted `Pass1CompetenceResult` where `operator_status` is
+  `'valide'` and `finalized_at` is set
+- **WHEN** `$result->finalVerdict()` is called
+- **THEN** it SHALL return `'valide'`
+
+#### Scenario: Result belongs to Run, Competence, and Level
+- **GIVEN** a persisted `Pass1CompetenceResult` linked to a `Run`, a `Competence`,
+  and a `Level`
+- **WHEN** `$result->run`, `$result->competence`, and `$result->level` are accessed
+- **THEN** all three SHALL return the related model instances
+
+## MODIFIED Requirements
+
+### Requirement: Competence table
+The system SHALL create a `competences` table with columns: `id` (bigint, PK),
+`referentiel_id` (bigint, FK → `referentiels.id`, ON DELETE CASCADE),
+`code` (string, not null), `label` (string, not null), `description` (text,
+nullable), `kind` (string, not null, DEFAULT `'transversale'` — one of:
+`technique`, `transversale`), `created_at`, and `updated_at`.
+
+The `kind` column classifies a competence as `technique` (code-inspectable —
+eligible for LLM Pass 1) or `transversale` (soft-skill / posture / communication
+— operator-validated only, NEVER graded by Pass 1). The DEFAULT is
+`'transversale'` (safe-exclude): a competence is never auto-graded by Pass 1
+unless explicitly classified `technique`. The `Competence` model SHALL expose a
+query scope (e.g., `scopeTechnical`) returning only `kind = 'technique'`
+competences.
+
+The `competences` table SHALL NOT have a `level_id` column. A competence is not
+"at" a single level — it spans all three progressive levels, and the
+`(competence, level)` association is carried by the `criteria` table. The
+`Competence` model SHALL have a `belongsTo` relation to `Referentiel` and a
+`hasMany` relation to `Criterion`. The `Competence` model SHALL NOT have a
+`level()` relation. The `Referentiel` model SHALL have a `hasMany` relation to
+`Competence`.
+
+#### Scenario: Competence table migrates cleanly
+- **GIVEN** the `referentiels` and `levels` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `competences` table SHALL exist
+- **AND** it SHALL have a non-nullable `referentiel_id` foreign key
+- **AND** it SHALL have a `kind` column defaulting to `'transversale'`
+- **AND** it SHALL NOT have a `level_id` column
+
+#### Scenario: Competence belongs to Referentiel
+- **GIVEN** a persisted `Competence` linked to a `Referentiel`
+- **WHEN** `$competence->referentiel` is accessed
+- **THEN** it SHALL return the related `Referentiel` instance
+
+#### Scenario: kind defaults to transversale (safe-exclude) and technical scope filters
+- **GIVEN** a `Competence` inserted with no explicit `kind`, and another with
+  `kind = 'technique'`
+- **WHEN** the rows are loaded and `Competence::technical()->get()` is queried
+- **THEN** the first SHALL have `kind = 'transversale'`
+- **AND** `Competence::technical()` SHALL return only the `technique` competence
+
+#### Scenario: Competence reaches its levels through criteria, not a direct FK
+- **GIVEN** a persisted `Competence`
+- **WHEN** the `competences` table column list is inspected
+- **THEN** there SHALL be no `level_id` column
+- **AND** the competence's levels SHALL be reachable only via its `criteria`
+  (`$competence->criteria` → each `$criterion->level`)
+
+### Requirement: Run table
+The system SHALL create a `runs` table with columns: `id` (bigint, PK),
+`student_repo_id` (bigint, FK → `student_repos.id`, ON DELETE CASCADE),
+`brief_id` (bigint, FK → `briefs.id`, ON DELETE RESTRICT),
+`status` (string, not null, default `'pending'`),
+`runner_report_json` (json, nullable — the raw runner output stored for
+audit), `started_at` (timestamp, nullable), `ended_at` (timestamp, nullable),
+`created_at`, and `updated_at`.
+
+The `Run` model SHALL have a `belongsTo` relation to `StudentRepo`, a
+`belongsTo` relation to `Brief`, a `hasMany` relation to `Evidence`, a
+`hasMany` relation to `Draft`, a `hasMany` relation to `ProbeFlag`, and a
+`hasMany` relation to `Pass1CompetenceResult`.
+
+#### Scenario: Run table migrates cleanly
+- **GIVEN** the `student_repos` and `briefs` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `runs` table SHALL exist
+- **AND** it SHALL have `student_repo_id` and `brief_id` foreign keys
+
+#### Scenario: Run belongs to StudentRepo and Brief
+- **GIVEN** a persisted `Run` linked to a `StudentRepo` and a `Brief`
+- **WHEN** `$run->studentRepo` and `$run->brief` are accessed
+- **THEN** both SHALL return the related model instances
+
+#### Scenario: Run has many Evidence, Draft, ProbeFlag, and Pass1CompetenceResult
+- **GIVEN** a persisted `Run` with two `Evidence`, one `Draft`, one `ProbeFlag`,
+  and one `Pass1CompetenceResult`
+- **WHEN** `$run->evidence`, `$run->drafts`, `$run->probeFlags`, and
+  `$run->pass1CompetenceResults` are accessed
+- **THEN** each SHALL return a Collection of the correct type
+
+### Requirement: Evidence table — Pass 1 blind, file+line citations, no student identity
+The system SHALL create an `evidence` table with columns: `id` (bigint, PK),
+`run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
+`criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable
+unit this evidence supports),
+`check_id` (string, nullable — present only when the evidence originated from a
+named runner check; null for LLM-cited Pass 1 evidence),
+`file_path` (string, nullable — relative path from repo root),
+`line_number` (integer, nullable — 1-based line number),
+`excerpt` (text, nullable — a short string excerpt, max 500 chars),
+`kind` (string, nullable — when set, one of: `stdout`, `stderr`, `git`,
+`filesystem`, `command`),
+`status` (string, nullable — when set, one of: `pass`, `fail`, `skip`),
+`message` (string, nullable — the LLM citation `note`, or a runner message),
+`created_at`, and `updated_at`.
+
+The Pass 1 evidence item is an LLM citation of the form `{file, line, note}`:
+`file_path` + `line_number` locate the code, and `message` holds the `note`.
+The runner-oriented columns `check_id`, `kind`, and `status` SHALL be nullable so
+LLM-cited evidence can omit them (runner check output itself is stored in
+`runner_report_json` on the `Run`, not here — per the repo-intake design).
+
+The `evidence` table SHALL be keyed on `criterion_id` as its single grain key —
+it SHALL NOT have a `competence_id` column; the competence is reachable via
+`criterion → competence`. The `evidence` table SHALL NOT have a `student_repo_id`
+column. The `evidence` table SHALL NOT have an `operator_persona` column. This
+enforces R3 (Pass 1 is blind — zero student identity in context) and R4 (persona
+never enters Pass 1) at the schema level, at the criterion grain.
+
+The `Evidence` model SHALL have a `belongsTo` relation to `Run` and a
+`belongsTo` relation to `Criterion`.
+
+#### Scenario: Evidence table migrates cleanly
+- **GIVEN** the `runs` and `criteria` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `evidence` table SHALL exist
+- **AND** it SHALL have `run_id` and `criterion_id` foreign keys
+- **AND** `check_id`, `kind`, and `status` SHALL be nullable
+- **AND** it SHALL NOT have a `competence_id` column
+- **AND** it SHALL NOT have a `student_repo_id` column
+- **AND** it SHALL NOT have an `operator_persona` column
+
+#### Scenario: LLM-cited evidence stores file, line, and note (R3)
+- **GIVEN** a persisted `Evidence` for an LLM citation with `file_path =
+  "app/Models/User.php"`, `line_number = 42`, and `message = "uses Eloquent
+  relation"`, and `check_id`/`kind`/`status` left null
+- **WHEN** the record is loaded
+- **THEN** `$evidence->criterion` SHALL return the related `Criterion`
+- **AND** `$evidence->file_path` SHALL equal `"app/Models/User.php"`
+- **AND** `$evidence->line_number` SHALL equal `42`
+- **AND** `$evidence->message` SHALL equal `"uses Eloquent relation"`
+
+#### Scenario: Evidence has no student identity (R3 blind pass)
+- **GIVEN** the `evidence` table schema
+- **WHEN** the column list is inspected
+- **THEN** there SHALL be no column named `student_repo_id`,
+  `student_name`, `operator_persona`, or any other student-identity column
+- **AND** the only way to reach a `StudentRepo` from `Evidence` is through
+  `Run` (two joins)
+
+### Requirement: Draft table — AI per-criterion assessment, default à vérifier (R1)
+The system SHALL create a `drafts` table with columns: `id` (bigint, PK),
+`run_id` (bigint, FK → `runs.id`, ON DELETE CASCADE),
+`criterion_id` (bigint, FK → `criteria.id`, ON DELETE RESTRICT — the evaluable
+unit this draft is for),
+`ai_status` (string, not null, default `'à vérifier'` — the AI's per-criterion
+assessment, one of: `à vérifier`, `semble valide`, `semble non valide`),
+`ai_raw_json` (json, nullable — the raw LLM response for auditability),
+`ai_reasoning` (text, nullable — the AI's human-readable reasoning),
+`created_at`, and `updated_at`.
+
+The `drafts` table is **AI-only**: it holds the model's per-criterion assessment
+and SHALL NOT have `operator_status`, `operator_note`, or `finalized_at` columns.
+Operator finalization happens at competence grain on `pass1_competence_results`
+(its `finalVerdict()` is the single finalization point); per-criterion drafts are
+inputs to that rollup, not a finalization grain.
+
+The `ai_status` column's allowed values SHALL be only `à vérifier`,
+`semble valide`, or `semble non valide` — the model NEVER asserts a bare
+`valide`/`non valide` verdict (R1). It SHALL have a database-level DEFAULT of
+`'à vérifier'` so that even a raw INSERT produces a safe draft (R1: "anything
+needing oral confirmation defaults to à vérifier, never valide"). A criterion
+with no surviving evidence is left at `à vérifier`.
+
+The `drafts` table SHALL be keyed on `criterion_id` as its single grain key — it
+SHALL NOT have a `competence_id` column.
+
+The `Draft` model SHALL have a `belongsTo` relation to `Run` and a `belongsTo`
+relation to `Criterion`. The `Draft` model SHALL NOT expose a `finalVerdict()`
+accessor (finalization is on `Pass1CompetenceResult`).
+
+#### Scenario: Draft table migrates cleanly and is AI-only
+- **GIVEN** the `runs` and `criteria` tables already exist
+- **WHEN** `php artisan migrate` is run
+- **THEN** the `drafts` table SHALL exist
+- **AND** it SHALL have a `criterion_id` foreign key and SHALL NOT have a
+  `competence_id` column
+- **AND** the `ai_status` column SHALL default to `'à vérifier'`
+- **AND** it SHALL NOT have `operator_status`, `operator_note`, or `finalized_at`
+  columns
+
+#### Scenario: ai_status defaults to à vérifier on raw insert (R1)
+- **GIVEN** a database insert into `drafts` that does not specify `ai_status`
+- **WHEN** the row is loaded
+- **THEN** `ai_status` SHALL equal `'à vérifier'`
+
+#### Scenario: ai_status uses only hedged AI values (R1)
+- **GIVEN** the contract for `drafts.ai_status`
+- **WHEN** the model writes an assessment
+- **THEN** the value SHALL be one of `à vérifier`, `semble valide`, or
+  `semble non valide`
+- **AND** it SHALL NEVER be a bare `valide` or `non valide` (those are operator
+  values on `pass1_competence_results`)
+
+#### Scenario: Draft belongs to Run and Criterion
+- **GIVEN** a persisted `Draft` linked to a `Run` and a `Criterion`
+- **WHEN** `$draft->run` and `$draft->criterion` are accessed
+- **THEN** both SHALL return the related model instances
+
+### Requirement: Model factories for all domain entities
+The system SHALL provide an Eloquent model factory for each of the 11 domain
+models: `Referentiel`, `Level`, `Competence`, `Criterion`, `Brief`,
+`StudentRepo`, `Run`, `Evidence`, `Draft`, `ProbeFlag`, and
+`Pass1CompetenceResult`.
+
+Each factory SHALL produce a valid, persistable model instance with sensible
+defaults (e.g., the `Draft` factory defaults `ai_status` to `'à vérifier'`; the
+`Pass1CompetenceResult` factory defaults `ai_rollup_status` to `'à vérifier'`,
+`operator_status` to null, and `finalized_at` to null; the `Competence` factory
+sets a `kind`). Each factory SHALL support relational defaults so that
+`$factory->create()` can auto-create parent relations where needed (e.g.,
+`Run::factory()->create()` auto-creates a `StudentRepo` and `Brief`;
+`Criterion::factory()->create()` auto-creates a `Competence` and `Level`;
+`Evidence`/`Draft` factories auto-create a `Criterion`;
+`Pass1CompetenceResult::factory()->create()` auto-creates a `Run`, `Competence`,
+and `Level`).
+
+#### Scenario: Draft factory defaults to safe à vérifier state (R1)
+- **GIVEN** the `Draft` factory
+- **WHEN** `Draft::factory()->create()` is called with no explicit overrides
+- **THEN** the persisted `ai_status` SHALL be `'à vérifier'`
+
+#### Scenario: Pass1CompetenceResult factory defaults to safe un-finalized state (R1)
+- **GIVEN** the `Pass1CompetenceResult` factory
+- **WHEN** `Pass1CompetenceResult::factory()->create()` is called with no overrides
+- **THEN** the persisted `ai_rollup_status` SHALL be `'à vérifier'`
+- **AND** `operator_status` SHALL be null
+- **AND** `finalized_at` SHALL be null
+- **AND** a `Run`, `Competence`, and `Level` SHALL be auto-created and linked
+
+#### Scenario: Criterion factory auto-creates its (Competence, Level) parents
+- **GIVEN** the `Criterion` factory
+- **WHEN** `Criterion::factory()->create()` is called with no explicit
+  `competence_id` or `level_id`
+- **THEN** a `Competence` and a `Level` SHALL be auto-created and linked
+- **AND** the persisted `Criterion` SHALL have non-null `competence_id` and `level_id`
+
+#### Scenario: Run factory auto-creates parent relations
+- **GIVEN** the `Run` factory
+- **WHEN** `Run::factory()->create()` is called with no explicit `student_repo_id`
+  or `brief_id`
+- **THEN** a `StudentRepo` and a `Brief` SHALL be auto-created and linked
+- **AND** the persisted `Run` SHALL have non-null `student_repo_id` and
+  `brief_id`

@@ -14,6 +14,10 @@ return new class extends Migration
             $table->string('code');
             $table->string('label');
             $table->text('description')->nullable();
+            // technique = code-inspectable (eligible for LLM Pass 1);
+            // transversale = soft-skill, operator-validated only. Safe-exclude
+            // default: never auto-graded unless explicitly marked technique.
+            $table->string('kind')->default('transversale');
             $table->timestamps();
         });
     }

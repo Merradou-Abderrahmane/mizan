@@ -12,12 +12,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('run_id')->constrained()->cascadeOnDelete();
             $table->foreignId('criterion_id')->constrained('criteria')->restrictOnDelete();
+            // AI-only per-criterion assessment (hedged: à vérifier / semble
+            // valide / semble non valide). Operator finalization is at competence
+            // grain on pass1_competence_results, not here.
             $table->string('ai_status')->default('à vérifier');
             $table->json('ai_raw_json')->nullable();
             $table->text('ai_reasoning')->nullable();
-            $table->string('operator_status')->nullable();
-            $table->text('operator_note')->nullable();
-            $table->timestamp('finalized_at')->nullable();
             $table->timestamps();
         });
     }
