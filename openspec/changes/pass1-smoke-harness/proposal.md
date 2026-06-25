@@ -1,0 +1,29 @@
+## Why
+
+Pass 1 (the blind LLM grading) is feature-complete end-to-end (`pass1-grading-core` + `pass1-grading-orchestration`, specs at 10 requirements) but has never been exercised live: tests use `Http::fake` + `FakeGraderClient`, zero real network. Before the next real feature (operator control panel UI) and before trusting the prompt/parser on student code, we need a repeatable CLI harness that lets the operator run the full pipeline (intake → runner structural checks → `pass1:grade`) against a real repo and inspect the result. Today the only way to reach `RepoIntakeService::intake()` is artisan `tinker`, and the DB ships with no référentiel, brief, or pivot rows — so nothing can be graded without hand-built data. This change adds the minimum operational tooling to run a real smoke test against `glm-5.2` on a v0 trusted repo.
+
+## What Changes
+
+- **Add** a `repo:intake {source} {brief}` artisan command — thin wrapper around the existing `RepoIntakeService::intake()`. Clones (if URL) or accepts a local path, runs the runner's six structural checks (R2, unchanged), persists a `Run` with `runner_report_json`, and prints the new `Run` id. No new domain logic — just an entry point that today exists only in `tinker`.
+- **Rewrite** `database/seeders/DatabaseSeeder.php` to seed a realistic référentiel — 3 levels (N1 imiter / N2 adapter / N3 transposer), 11 competences (5 `technique` + 6 `transversale`, codes T-C5/T-C6/T-C3/T-C7/T-C9 + TR-C1/TR-C2/TR-C3/TR-C4/TR-C5/TR-C1b), criteria at each `(competence, level)` pair, one `Brief` (the ThreadForge brief), and `brief_competence` pivot rows setting each technique competence's target `level_id`. Idempotent via `firstOrCreate` keyed on stable codes so `migrate:fresh --seed` is repeatable without duplication.
+- **Add** `database/seeders/SystemSeeder.php` (referentiel/levels/competences/criteria/brief/pivot) called from `DatabaseSeeder::run()` — split from the User seeder so each is independently reviewable and the User default isn't lost.
+- **ADD** `storage/test-repos/` to `.gitignore` so the student clone used for the smoke test (e.g. a shallow clone of `github.com/IBamou/ForgeCoreApi.git`) never accidentally lands in a commit. The clone itself is created by the operator, not by this change.
+- **DO NOT** add a UI,Modify the runner, change `GRADER_*` wiring, ship a secret, touch `pass1-grading` specs/primitives, or change domain-model. The seeder + command are operational tooling that exercises existing capabilities.
+
+This change is **explicitly out of scope**: identity display (persona stays hidden per R4 — the seeder does NOT seed `operator_persona`), the LLM gate sign-off (operator's go-live action, not code — confirmed before the first real `pass1:grade`), the operator review/finalize UI (the next real change), and sandbox hardening (still deferred).
+
+## Capabilities
+
+### New Capabilities
+- `pass1-smoke-harness`: operator-facing CLI tooling (the `repo:intake` artisan command) + a realistic, idempotent domain seeder that together make the full `intake → runner → pass1:grade` pipeline exercisable from the shell with a real `glm-5.2` call, against a v0 trusted repo, with no UI and no `tinker`.
+
+### Modified Capabilities
+None. This change introduces operational tooling around existing capabilities — it does not change any requirement of `runner-cli`, `repo-intake`, `domain-model`, or `pass1-grading`. `RepoIntakeService::intake()` is invoked as-is (R2 respected); the seeder only builds row inputs to existing schema (R1/R3/R4 schema-enforced by `domain-model`); `pass1:grade` is unchanged.
+
+## Impact
+
+- **Hard rules touched:** R1 (no — the seeder builds inputs; `pass1:grade`'s hedging + `à vérifier` defaults are unchanged), R2 (no — runner invoked as-is via `php <runner-bin> <repoPath>`; the command is a caller, not a runner modification — `apps/runner/` is untouched), R3 (no — `repo:intake` creates a `Run` with `runner_report_json` but ZERO `Evidence` rows per Change C's Option X; `pass1:grade`'s blind/path stays as-is), R4 (no — the seeder does NOT seed `operator_persona`; identity path stays `→ run → student_repo` and is only built by the operator at runtime), R5 (yes, reinforced — the command is a thin wrapper, one subprocess + one parse + one transaction; the seeder is plain `firstOrCreate` rows; no clever heuristics).
+- **Security / sandbox boundary:** NOT touched. No `apps/runner/` changes, no Docker, no egress (the command calls the runner on the local host under the existing v0 "trusted repos only on Laragon" deferral). The first LIVE `glm-5.2` call happens only when the operator runs `pass1:grade` after this change is merged AND after the operator confirms glm-5.2 zero-retention (a go-live sign-off recorded in the handoff log, not a code change in this change).
+- **Code:** `apps/web/app/Console/Commands/RepoIntakeCommand.php` (new), `apps/web/database/seeders/DatabaseSeeder.php` (rewrite), `apps/web/database/seeders/SystemSeeder.php` (new), `apps/web/.gitignore` (one line added). Approximately 6–8 tasks total — well under the ~15 atomic limit.
+- **Dependencies:** None added. Uses existing Eloquent models, the existing `RepoIntakeService`, the existing runner CLI, and Symfony `Process` indirectly through the service.
+- **Tests:** A small new test class `tests/Feature/RepoIntakeCommandTest.php` exercising the command's success path (valid local path, asserts a `Run` is created + output contains the run id) and failure path (brief not found → exit 1 + error message). The seeder is exercised by a test that calls `migrate:fresh --seed` against an in-memory SQLite and asserts the row counts (3 levels, 11 competences, 33 criteria = 11×3, 1 brief, 5 pivot rows with `level_id`). No live network in any test (the command test fakes the runner subprocess via a fixture path that exists; no live `glm-5.2` in tests).

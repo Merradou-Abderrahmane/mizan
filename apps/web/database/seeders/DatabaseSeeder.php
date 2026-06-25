@@ -2,24 +2,27 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Database\Eloquent\Model;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Seed the application's database.
+     *
+     * Order matters: the SystemSeeder builds the référentiel + criteria + brief
+     * domain graph the grader needs; the stock User factory preserves the
+     * default Laravel dev user that some facades expect during local dev.
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        Model::unguarded(function (): void {
+            (new SystemSeeder())->run();
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+            \App\Models\User::factory()->create([
+                'name'  => 'Test User',
+                'email' => 'test@example.com',
+            ]);
+        });
     }
 }

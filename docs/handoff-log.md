@@ -850,3 +850,50 @@ never re-grades), or (c) the operator confirms the egress gate and runs
 > zero-retention (operator's go-live sign-off, not a code change). Next is the
 > operator's choice: Pass 1 UI, Pass 2, or the first real graded run. Hard rules
 > + v0 sandbox-deferral stand.
+---
+
+## 2026-06-25 — Step 8: pass1-smoke-harness — `repo:intake` command + idempotent domain seeder
+
+**Change name:** `pass1-smoke-harness`
+**OpenSpec change folder:** `openspec/changes/pass1-smoke-harness/` (active; will archive after PR merge)
+**Branch:** `feat/pass1-smoke-harness` off `main`.
+
+**Why:** Pass 1 has never been exercised live — every test uses `Http::fake` + `FakeGraderClient`. The operator wants to smoke-test the full pipeline (`intake -> runner -> pass1:grade`) against a real `glm-5.2` call on a v0 trusted repo before building the UI. Two operational gaps block that: (1) `RepoIntakeService::intake()` is reachable only via `tinker`; (2) the DB ships empty (`DatabaseSeeder` creates only a `User`), so nothing can be graded without hand-built data. This change adds the smallest possible surface to make the pipeline exercisable from the shell: one new artisan command + one idempotent seeder + one .gitignore line.
+
+**What shipped (all `apps/web`, no schema/runner/UI change):**
+- `app/Console/Commands/RepoIntakeCommand.php` — `php artisan repo:intake {source} {brief}` thin wrapper around `RepoIntakeService::intake()` (R5). Forwards both args verbatim. Exit: 0 + `Run {id} created (status: {status}).` on success; 1 + `Brief not found: {id}` / `Brief id must be an integer.` / `Intake failed: …` on failure. No domain logic; does NOT modify `apps/runner/` (R2 tested).
+- `database/seeders/SystemSeeder.php` — idempotent domain seed: 1 Référentiel, 3 Levels (N1 imiter / N2 adapter / N3 transposer), 11 Competences (5 technique: T-C5/T-C6/T-C3/T-C7/T-C9; 6 transversale: TR-C1/TR-C2/TR-C3/TR-C4/TR-C5/TR-C1b), 33 Criteria (one per (competence, level), descriptions inspired by the ThreadForge brief's performance families — Sanctum / API Resources / N+1 / Queue / 202 Accepted / structured output / JSON cast / function-calling / tool / conversation memory / atomic commits / Scribe), 1 Brief (ThreadForge), 5 brief_competence pivot rows attaching each technique competence at a target level (T-C7->N2, T-C6->N2, T-C3->N2, T-C5->N3, T-C9->N1). All built via `firstOrCreate` keyed on stable matching attrs / `syncWithoutDetaching` for the pivot — re-runnable without constraint violations. R4 enforced: the seeder does NOT seed any `StudentRepo` and does NOT set `operator_persona` on any row.
+- `database/seeders/DatabaseSeeder.php` — rewritten to call `SystemSeeder` then the stock `User::factory()->create()`, both inside `Model::unguarded()`.
+- `.gitignore` — added `/storage/test-repos/` so the operator's student-repo clone for the smoke test never lands in a commit.
+- 2 new test classes: `tests/Feature/RepoIntakeCommandTest.php` (5 tests, mocks `RepoIntakeService` so no real runner subprocess in tests — fast + hermetic; failure paths use the real service because `Brief::findOrFail` throws before any subprocess; one test asserts `apps/runner/` is unmodified) + `tests/Feature/SystemSeederTest.php` (5 tests: full graph counts, idempotency across two runs, pivot target-levels attach only to technique competences, persona not seeded, criteria descriptions reference ThreadForge performance families).
+
+**Hard rules:** R1 (no — seeder builds inputs only; `pass1:grade` hedging unchanged), R2 (no runner modification; tested `git diff -- apps/runner/` is empty after `repo:intake`), R3 (no — `repo:intake` creates zero `Evidence` rows per Change C's Option X; identity path stays `-> run -> student_repo`), R4 (no — seeder does NOT seed `operator_persona`; persona stays operator-private and only enters the system at runtime via `repo:intake`), R5 (yes — the command is a thin wrapper round an existing service; the seeder is plain `firstOrCreate` rows; no clever heuristics).
+
+**Sandbox/security boundary:** NOT touched. No `apps/runner/` change. No Docker. No egress. No new secret. The first LIVE `glm-5.2` call happens only when the operator runs `pass1:grade` AFTER this change is merged AND AFTER the operator confirms glm-5.2 zero-retention (the go-live gate — recorded in the log; not a code change in this change). v0 trusted-repos deferral stands.
+
+**Test results:** `php artisan test --exclude-group=slow` — 74 passed (306 assertions, 67s). Slow `RepoIntakeServiceTest` (5 tests, ~80s, real runner subprocess) included in the full run is also green — no regression. Live `php artisan migrate:fresh --seed --force` against MySQL confirmed: 1 referentiel, 3 levels, 11 competences (5 technique/6 transversale), 33 criteria, 1 brief, 5 brief_competence pivot rows attached to the 5 technique competences at their target levels, 0 student_repos (R4), 0 runs. `php artisan list | grep repo:intake` shows the command registered.
+
+**Operator smoke-test recipe (post-merge + post-gate sign-off):**
+
+```
+git clone --depth 1 https://github.com/IBamou/ForgeCoreApi.git apps/web/storage/test-repos/ForgeCoreApi
+php artisan migrate:fresh --seed
+php artisan repo:intake storage/test-repos/ForgeCoreApi 1
+php artisan pass1:grade <run-id>     # ~5 live glm-5.2 calls; ~$0.10-0.30
+php artisan tinker                   # inspect evidence/drafts/pass1_competence_results
+```
+
+**Critical operational note — local path vs URL:** the operator MUST pass a LOCAL PATH to `repo:intake` for a run that will later be graded. If a URL is passed, the service's `finally` block deletes the temp clone after the runner finishes, leaving `clone_path` as the URL string — `RepoDigest::build($run->studentRepo->clone_path)` then throws and every Pass 1 competence grades to `à vérifier`. This is by design: URL intake is valid for "structural-only" runs that should never call Pass 1. This is also flagged in the command's `--help` description.
+
+**Explicit warning — CRITERIA ARE SMOKE-TEST FIXTURES, NOT THE AUTHORITATIVE RÉFÉRENTIEL:**
+the `SystemSeeder` writes criteria descriptions inspired by the ThreadForge brief's "Critères de performance" section. They make the live glm-5.2 grade meaningful as a PLUMBING proof (does the prompt + parser + hedging + citation enforcement work against a real LLM response?), NOT as a real evaluation. The operator MUST replace these seeder criteria texts with the real critères d'évaluation from the authoritative référentiel before any real evaluation. The seeder lives under `database/seeders/` (dev-only location) so swapping it has no schema consequences.
+
+**State at handoff:**
+- On `feat/pass1-smoke-harness` off `main`. Active change folder: `openspec/changes/pass1-smoke-harness/` (validated strict). Will archive + spec-sync + Purpose after PR merge.
+- Canonical specs on `main` UNCHANGED for now: `domain-model` (12), `pass1-grading` (10), `repo-intake` (5), `runner-cli` (8). This change adds ONE NEW canonical capability `pass1-smoke-harness` (3 requirements: `repo:intake` command, idempotent domain seeder, `storage/test-repos/` gitignored) at archive time.
+
+**Next planned step (unchanged from Step 7):** the operator control panel UI (Livewire + DaisyUI — list runs, create a Run from Brief + StudentRepo, trigger intake, trigger `pass1:grade`, view evidence + drafts + rollup, **finalize** = the R1 enforcement surface). That is the next real feature.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. `pass1-smoke-harness` shipped (on `feat/pass1-smoke-harness` off `main`, OpenSpec validated, 74/74 tests green, migrated + seeded on live MySQL). It adds `php artisan repo:intake {source} {brief}` + an idempotent `SystemSeeder` (1 referentiel, 3 levels, 11 competences, 33 criteria, 1 ThreadForge brief, 5 target-level pivots, no persona — R4) + `storage/test-repos/` gitignored. Operator smoke-test recipe is in this log entry (clone ForgeCoreApi locally, migrate:fresh --seed, repo:intake, pass1:grade; GATE: confirm glm-5.2 zero-retention before the live run). CRITERIA TEXTS ARE FIXTURES — operator must replace SystemSeeder's criteria with the real référentiel before real evaluation. Branch merge + `openspec archive -y` + Purpose fix + closeout still pending. After that: the operator control panel UI (R1 finalization surface). Hard rules + v0 sandbox-deferral stand.
