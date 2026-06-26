@@ -1003,6 +1003,54 @@ student-facing export, or the operator's first real graded run (post egress sign
 
 ---
 
+## 2026-06-25 — Step 9 closeout: operator-panel-ui archive + spec create + merge
+
+Closeout for `operator-panel-ui` (the Step 9 build entry above). Backfilled
+after the fact (the original session merged + archived but never wrote this
+closeout into the log). No new feature code — OpenSpec promotion + merge only.
+
+**What happened:**
+- Branch `feat/operator-panel-ui` merged to `main` via **PR #11** (`000c341`;
+  feature commit `4a61cc7`).
+- `openspec archive operator-panel-ui -y` → **created** canonical
+  `openspec/specs/operator-panel/spec.md` (`operator-panel: create`, **6
+  requirements**: Runs list screen; Launch a run from the panel; Run detail
+  shows evidence-backed Pass 1 results; Operator finalizes per competence; AI
+  advice is visually non-authoritative; Persona stays operator-private) and
+  archived the change folder to `2026-06-25-operator-panel-ui`. Closeout commit
+  `7de9fc9`.
+- Replaced the `TBD` Purpose with a real one tying the panel to **R1** (the
+  finalize screen is the enforcement surface — AI always hedged & visually
+  non-authoritative, solid verdict operator-only & gated on `finalized_at`),
+  **R3** (display + finalize only, never re-grades; transversal competences
+  never shown; excerpt is verified source, not the model's claim), **R4**
+  (persona shown only in the panel, never into runner/prompt), **R5** (thin
+  Livewire over existing services). `openspec validate --specs` → all pass.
+
+**State at this closeout:**
+- On `main`, clean. Active `openspec/changes/` holds only `archive/`.
+- Canonical specs: `domain-model` (12), `pass1-grading` (10), `repo-intake`
+  (5), `runner-cli` (8), `pass1-smoke-harness` (3), **`operator-panel` (6)**.
+- `operator-panel-ui` is DONE: applied, merged (PR #11 at `000c341`), archived,
+  spec created + Purpose written.
+
+**Operational gotchas a future session MUST NOT rediscover the hard way**
+(detailed in the dedicated section immediately below, restated here so this
+closeout is self-contained):
+1. **Queue worker** — `QUEUE_CONNECTION=database` since this change. A launched
+   run only advances past `processing` while **`php artisan queue:work`** is
+   running. No worker → job sits in `jobs`, run stuck at `processing`
+   (recoverable; throwing jobs land in `failed_jobs`).
+2. **Egress gate** — a UI-triggered grade is a real `glm-5.2` call; the
+   operator's glm-5.2 zero-retention sign-off still gates the FIRST live run.
+3. **Local-path-not-URL** — for a run you intend to grade, pass a LOCAL PATH to
+   intake. A URL clone is deleted in the service's `finally`, leaving
+   `clone_path` as the URL string → `RepoDigest::build()` throws and every
+   competence grades to `à vérifier`. URL intake is valid only for
+   structural-only runs that never call Pass 1.
+
+---
+
 ## 2026-06-25 — Operational prerequisites for a live Pass 1 run (gotchas)
 
 Two operational gotchas a future session MUST know before (or while) running the
@@ -1029,3 +1077,132 @@ process preconditions that silently leave a run looking "stuck" or "ungraded".
    DPA. `GRADER_MODEL` is config so a verified model can be pinned. This gate
    blocks only the FIRST live run — never the build, tests, or merges. Nothing
    auto-runs; a live call only happens on the operator's explicit action.
+
+---
+
+## 2026-06-25 — Step 10: run-pending-prerow — launched run shows immediately as `pending`
+
+**Change name:** `run-pending-prerow`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-25-run-pending-prerow/`
+**Branch:** `feat/run-pending-prerow` → merged via **PR #12** (`2b97c8c`;
+feature commit `241fa2f`), archived + operator-panel spec synced (`7ef419c`).
+
+**Why:** the optional follow-up flagged in the `operator-panel-ui` PR. That
+change deliberately kept `RepoIntakeService` untouched, so the launch job called
+`intake()` — which **creates** the `Run` itself, only after the ~20s runner step.
+Cost: a launched run was invisible for ~20s, then appeared already `processing`.
+This change makes a launched run show **immediately** as `pending`.
+
+**What shipped (all `apps/web`, no schema/runner/grading-logic change):**
+- **ADD** `RepoIntakeService::intakeIntoRun(Run $run): Run` — runs the structural
+  runner against an ALREADY-persisted run's repo and fills
+  `runner_report_json`/`started_at`/`ended_at`. It does **NOT** set `run.status`
+  — the caller (the job) owns the `pending → processing → terminal` lifecycle.
+  On `RunnerCrashException` it writes the error report + `ended_at` and rethrows.
+- **Refactor** `intake()` to share a new `protected runRunnerOnSource(string)`
+  (clone-if-URL + invoke runner + always clean up the temp clone) + a private
+  `crashReport()`. `intake()`'s persistence/transaction code is byte-for-byte
+  unchanged — `RepoIntakeServiceTest` (real runner) is the regression guard
+  (5/5 green in isolation). One runner-invocation path (DRY, R5).
+- **MODIFY** the new-run flow: `Runs/Create::submit()` creates the `StudentRepo`
+  (+persona, R4) and the `Run` (status `pending`) **synchronously in the
+  request** (two plain inserts), dispatches `IntakeAndGradeRun($run->id)`, and
+  redirects to the run detail — so the run is visible as `pending` at once.
+- `IntakeAndGradeRun` constructor now takes **`int $runId`** (not the repo
+  source/persona). `handle()` loads the run, sets `processing`, calls
+  `intakeIntoRun` (catch `RunnerCrashException` → `error`, return), then `grade()`
+  (catch `Throwable` → `error`, rethrow), then terminal
+  `pass1_done`/`pass1_partial`.
+- **No new dependency, no schema change, no runner/grading-logic change.**
+  `intake()` and the `repo:intake` command keep working exactly as before.
+
+**Hard rules:** **R4 tightened** — persona is written ONLY on `StudentRepo` in
+`Create`, and is no longer passed to the job at all (the job now receives only a
+run id), so it can never reach the runner subprocess or a Pass 1 prompt.
+**R1/R3** unchanged (no grading-logic touch; hedging + finalize surface intact).
+**R5** — the new method mirrors `intake()` via the shared helper; the component
+does two plain inserts. **R2** untouched.
+**Sandbox/security:** NONE. Same trigger surface; the egress go-live gate is
+unchanged. v0 trusted-repos deferral stands.
+
+**Spec impact:** **MODIFIES** the canonical `operator-panel` spec's "Launch a run
+from the panel" requirement — it now guarantees the run appears **immediately**
+as `pending` (not only once intake registers it), then transitions to
+`processing` and its terminal status. The non-blocking-submit guarantee is
+unchanged. `openspec archive run-pending-prerow -y` synced this delta into
+`openspec/specs/operator-panel/spec.md` (still **6 requirements** — a MODIFY, not
+an add) and archived the folder. All specs validate.
+
+**New behavior note (worker interaction):** because the run is now pre-created,
+**with no `queue:work` worker a launched run sits at `pending`** (one stage
+earlier than the old `processing`-stuck symptom) instead of advancing. Still
+recoverable, non-corrupting — same root cause, just a different visible stage.
+
+**Test results:** `php artisan test --exclude-group=slow` → **96 passed** (389
+assertions). New/updated: `IntakeIntoRunTest` (2 — populates an existing run's
+report without setting status via a substituted-runner subclass, no subprocess;
+crash path persists the error report + rethrows), `IntakeAndGradeRunJobTest` (4 —
+job drives `pending → pass1_done` / `pass1_partial` / `error`; mocked services,
+no network/subprocess), and `OperatorPanelTest` create tests updated (`Create`
+makes a `pending` run + `StudentRepo` with persona, dispatches, redirects to
+detail via `Bus::fake`; unknown brief creates no run and dispatches nothing).
+`RepoIntakeServiceTest` 5/5 green in isolation (no regression from the `intake()`
+refactor). Pint clean.
+
+**State at handoff:**
+- On `main`, clean, in sync with `origin/main` at `7ef419c`. Active
+  `openspec/changes/` holds only `archive/`. **No active changes.**
+- Canonical specs: `domain-model` (12), `pass1-grading` (10), `repo-intake` (5),
+  `runner-cli` (8), `pass1-smoke-harness` (3), `operator-panel` (6).
+- `run-pending-prerow` is DONE: applied, merged (PR #12 at `2b97c8c`), archived,
+  operator-panel spec synced. **This is the latest work — the log now matches
+  reality through Step 10.**
+
+**Outstanding prerequisites (blocked on the operator, not on code) — carried
+forward, must NOT be rediscovered the hard way:**
+1. **Queue worker** — `QUEUE_CONNECTION=database`. A launched run advances only
+   while **`php artisan queue:work`** is running; otherwise it sticks at
+   `pending` (since this change) / `processing`. Recoverable; throwing jobs →
+   `failed_jobs`.
+2. **glm-5.2 zero-retention egress sign-off** — the go-live gate for the FIRST
+   real `pass1:grade` (a live `glm-5.2` call via opencode/zen). Residuals to
+   confirm: glm-5.2 is the *paid* zen model (not a free variant), US-only
+   residency acceptable, docs are a representation not a signed DPA.
+   `GRADER_MODEL` is config so a verified model can be pinned. Blocks only the
+   first live run — never build/tests/merges.
+3. **Référentiel swap (still on the operator)** — `SystemSeeder`'s criteria
+   texts are smoke-test FIXTURES (ThreadForge-inspired), not the authoritative
+   référentiel. They prove the plumbing (prompt + parser + hedging + citation
+   enforcement against a real LLM response), NOT a real evaluation. Replace them
+   with the real critères d'évaluation before any real evaluation. Seeder lives
+   under `database/seeders/` (dev-only) → swapping has no schema consequence.
+4. **Local-path-not-URL clone gotcha** — for a run you intend to grade, pass a
+   LOCAL PATH to intake. A URL clone is deleted in the service's `finally`,
+   leaving `clone_path` as the URL string → `RepoDigest::build()` throws and
+   every competence grades to `à vérifier`. URL intake is valid only for
+   structural-only runs that never call Pass 1.
+
+**Next planned step:** with Pass 1 feature-complete end-to-end (primitives +
+orchestration + command + panel + immediate-`pending` UX) and the log now
+current, the natural follow-ons are: (a) the operator confirms the egress gate +
+swaps the référentiel and does the **first real graded run**; (b) **Pass 2**
+(contextual probe flags — uses student level/history, never re-grades, never
+auto-downgrades; divergence/regression are probe flags only); or (c) a
+student-facing export. The operator decides which next; branch off `main` +
+`openspec-propose`, continuing the propose → apply → archive loop with the
+branch + PR gate.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. The log is current
+> through **Step 10 (`run-pending-prerow`, merged PR #12 at `2b97c8c`,
+> archived)** — a launched run now shows immediately as `pending`
+> (`RepoIntakeService::intakeIntoRun`; `Runs/Create` pre-creates the run; job
+> takes a run id, tightening R4). On `main`, clean, no active changes. Six
+> canonical specs: `domain-model` (12), `pass1-grading` (10), `repo-intake` (5),
+> `runner-cli` (8), `pass1-smoke-harness` (3), `operator-panel` (6). Pass 1 is
+> feature-complete end-to-end. Before the first live run the operator must: run
+> `queue:work`, give the glm-5.2 zero-retention sign-off, swap `SystemSeeder`'s
+> fixture criteria for the real référentiel, and pass a LOCAL PATH (not a URL)
+> to intake. Next is the operator's choice: first real graded run, Pass 2, or a
+> student-facing export. Hard rules + v0 sandbox-deferral stand.
