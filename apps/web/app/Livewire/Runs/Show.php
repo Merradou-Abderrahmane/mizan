@@ -5,6 +5,7 @@ namespace App\Livewire\Runs;
 use App\Models\Run;
 use App\Support\SourceExcerpt;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -17,6 +18,19 @@ class Show extends Component
     public function mount(Run $run): void
     {
         $this->run = $run;
+    }
+
+    /**
+     * A CompetenceFinalize child dispatches `competence-finalized` after a
+     * finalize or reopen. Receiving it here re-renders Show so the page-level
+     * "N finalized" summary reflects the change immediately, without the
+     * operator having to reload (the detail screen does not poll once the run
+     * has reached a terminal status).
+     */
+    #[On('competence-finalized')]
+    public function onCompetenceFinalized(): void
+    {
+        // No state to mutate — render() recomputes the summary from fresh data.
     }
 
     public function render()

@@ -33,11 +33,17 @@
                 <div class="flex flex-wrap gap-2">
                     @foreach ($checks as $check)
                         @php
-                            $ok = ($check['status'] ?? $check['passed'] ?? null);
-                            $passed = $ok === true || $ok === 'pass' || $ok === 'passed' || $ok === 'ok';
+                            $raw = $check['status'] ?? $check['passed'] ?? null;
+                            $norm = is_bool($raw) ? ($raw ? 'pass' : 'fail') : strtolower((string) $raw);
+                            $passed = in_array($norm, ['pass', 'passed', 'ok', 'true', '1'], true);
+                            $skipped = in_array($norm, ['skip', 'skipped'], true);
+                            // A skip is not a failure (e.g. a check skipped for a missing
+                            // extension) — render it neutral, never as a red ✗.
+                            $cls = $passed ? 'badge-success badge-outline' : ($skipped ? 'badge-ghost' : 'badge-error badge-outline');
+                            $glyph = $passed ? '✓' : ($skipped ? '○' : '✗');
                         @endphp
-                        <span class="badge {{ $passed ? 'badge-success badge-outline' : 'badge-error badge-outline' }} gap-1">
-                            {{ $passed ? '✓' : '✗' }} {{ $check['id'] ?? $check['name'] ?? 'check' }}
+                        <span class="badge {{ $cls }} gap-1">
+                            {{ $glyph }} {{ $check['id'] ?? $check['name'] ?? 'check' }}
                         </span>
                     @endforeach
                 </div>
@@ -148,8 +154,10 @@
                             </div>
                         @endif
 
-                        {{-- Finalization (R1 surface) --}}
-                        @livewire('runs.competence-finalize', ['resultId' => $result->id], key('cf-'.$result->id))
+                        {{-- Finalization (R1 surface). The :key gives each child a
+                             stable identity so Livewire never bleeds one
+                             competence's finalize state onto another on re-render. --}}
+                        <livewire:runs.competence-finalize :result-id="$result->id" :key="'cf-'.$result->id" />
                     </div>
                 </div>
             @endforeach
