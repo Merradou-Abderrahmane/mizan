@@ -35,10 +35,13 @@ context: |
   no secrets mounted into the student container, hard CPU/memory/time limits.
   Any change touching the runner/sandbox/egress boundary REQUIRES human review.
 
-  UI: DaisyUI on Tailwind v4 only; never hand-roll a design system. On any real
-  aesthetic decision (accent, density, light/dark), PAUSE and ask the operator
-  with 2–3 concrete options + a recommendation. Operator always reviews and edits
-  drafts before finalize — never auto-accept, never soften a real "non valide".
+  UI: DaisyUI on Tailwind v4 only; never hand-roll a design system. Any UI change
+  MUST read and conform to openspec/ui-conventions.md (the written standard for how
+  DaisyUI is used: spacing, cards, status colours, the R1 finalize emphasis, text
+  containment, page structure, density). On any real aesthetic decision (accent,
+  density, light/dark) not already settled there, PAUSE and ask the operator with
+  2–3 concrete options + a recommendation. Operator always reviews and edits drafts
+  before finalize — never auto-accept, never soften a real "non valide".
 
 rules:
   proposal:
