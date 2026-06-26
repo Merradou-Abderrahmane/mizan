@@ -238,4 +238,69 @@ class OperatorPanelTest extends TestCase
         $this->assertSame(0, Run::count());
         Bus::assertNotDispatched(IntakeAndGradeRun::class);
     }
+
+    /**
+     * Add a second technical competence (criterion + rollup) to an existing
+     * fixture's run/brief, so the detail screen renders two finalize controls.
+     */
+    private function addTechnicalResult(array $f): Pass1CompetenceResult
+    {
+        $run = $f['run'];
+        $brief = $run->brief;
+        $levelId = $f['result']->level_id;
+
+        $competence = Competence::factory()->create([
+            'referentiel_id' => $brief->referentiel_id, 'label' => 'Sécuriser une API', 'kind' => 'technique',
+        ]);
+        $brief->competences()->attach($competence->id, ['level_id' => $levelId]);
+        Criterion::factory()->create([
+            'competence_id' => $competence->id, 'level_id' => $levelId,
+            'code' => 'C5.1', 'label' => 'Auth tokens', 'sort_order' => 1,
+        ]);
+
+        return Pass1CompetenceResult::create([
+            'run_id' => $run->id, 'competence_id' => $competence->id, 'level_id' => $levelId,
+            'ai_rollup_status' => 'à vérifier', 'confidence' => 0.40,
+            'probe_questions' => [], 'raw_json' => ['raw_response' => '{}'],
+        ]);
+    }
+
+    public function test_each_finalize_control_has_a_stable_distinct_key(): void
+    {
+        // Two technical competences → two finalize children, each needing its own
+        // stable identity so Livewire never bleeds one's state onto the other.
+        $f = $this->makeGradedRun();
+        $second = $this->addTechnicalResult($f);
+
+        Livewire::test(Show::class, ['run' => $f['run']])
+            ->assertSeeHtml('wire:key="cf-'.$f['result']->id.'"')
+            ->assertSeeHtml('wire:key="cf-'.$second->id.'"');
+    }
+
+    public function test_finalizing_refreshes_the_parent_summary_without_reload(): void
+    {
+        $f = $this->makeGradedRun();
+
+        $show = Livewire::test(Show::class, ['run' => $f['run']])
+            ->assertSeeText('0 finalized');
+
+        // The child persists the finalization, then dispatches the event Show listens for.
+        $f['result']->update(['operator_status' => 'valide', 'finalized_at' => now()]);
+
+        $show->dispatch('competence-finalized')
+            ->assertSeeText('1 finalized');
+    }
+
+    public function test_skipped_runner_check_is_not_rendered_as_a_failure(): void
+    {
+        $f = $this->makeGradedRun();
+        $f['run']->update(['runner_report_json' => ['checks' => [
+            ['id' => 'migrations_run', 'status' => 'skip'],
+        ]]]);
+
+        Livewire::test(Show::class, ['run' => $f['run']])
+            ->assertSeeText('migrations_run')   // the skipped check is still shown
+            ->assertSee('○')                    // with the neutral skip glyph
+            ->assertDontSeeHtml('badge-error'); // and never as a red failure badge
+    }
 }
