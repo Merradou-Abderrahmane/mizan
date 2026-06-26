@@ -1206,3 +1206,102 @@ branch + PR gate.
 > fixture criteria for the real référentiel, and pass a LOCAL PATH (not a URL)
 > to intake. Next is the operator's choice: first real graded run, Pass 2, or a
 > student-facing export. Hard rules + v0 sandbox-deferral stand.
+
+---
+
+## 2026-06-26 — Step 11: operator-panel-finalize-fixes — three detail-screen bugs
+
+**Change name:** `operator-panel-finalize-fixes`
+**OpenSpec change folder:** `openspec/changes/archive/2026-06-26-operator-panel-finalize-fixes/`
+**Branch:** `fix/operator-panel-finalize-bugs` → merged via **PR #13** (`a6a54e4`;
+fix commit `55b6fc5`), archived + operator-panel spec synced (this closeout).
+
+**Why:** an operator review of the panel found it looked plain and threw errors.
+Diagnosis separated three real bugs (below) from purely aesthetic problems; the
+operator scoped this change to **bugs only** (no design change). The aesthetic
+pass was deliberately deferred.
+
+**What shipped (all `apps/web`, no schema/runner/grading-logic/design change):**
+- **Stable finalize-child identity.** `show.blade.php` had mounted each
+  per-competence finalize child with `@livewire('runs.competence-finalize', [...],
+  key('cf-'.$result->id))`. Two bugs in one line: `key()` is **PHP's built-in
+  array-pointer function** (throws `TypeError` on a string in isolation), AND
+  Livewire 4's `@livewire` directive **silently drops a third positional
+  argument** at compile time — so the intended `wire:key` was never set (the
+  compiled view omitted it; no crash, but no key either). With N finalize children
+  in a re-rendering parent, Livewire had no stable per-child identity → risk of one
+  competence's finalize state bleeding onto another (wrong-card verdict, an R1
+  hazard). **Fix:** the tag form
+  `<livewire:runs.competence-finalize :result-id="$result->id" :key="'cf-'.$result->id" />`,
+  which compiles to a real `$__key` and renders `wire:key="cf-<id>"` on each child.
+- **Parent summary refresh.** `CompetenceFinalize` dispatches `competence-finalized`
+  but `Show` had no listener, and the detail screen only polls while
+  `pending`/`processing`. So finalizing on a terminal run left the page-level
+  `N finalized` summary stale until a manual reload. **Fix:**
+  `#[On('competence-finalized')]` on `Show` (empty body) → re-render; `render()`
+  recomputes the summary from `->fresh(...)`. Chose an event listener over
+  always-polling a finished run (cheaper, precise).
+- **Skip-vs-fail rendering.** The runner structural-report badges treated anything
+  not `pass` as a failure, so a legitimate `skip` (e.g. a check skipped for a
+  missing PHP extension) showed as a red ✗. **Fix:** normalize the status —
+  `skip`/`skipped` → neutral `badge-ghost` (○), `pass`/`ok` → success (✓), else →
+  red ✗.
+
+**Hard rules:** **R1 reinforced** (stable child identity prevents verdict-state
+bleed; finalize reflects without a stale reload; finalization still writes only the
+operator columns — unchanged). R2/R3/R4/R5 unchanged.
+**Sandbox/security:** NONE touched; the egress go-live gate is unchanged. v0
+trusted-repos deferral stands.
+
+**Spec impact:** archive synced **2 MODIFIED** requirements into canonical
+`openspec/specs/operator-panel/spec.md` (still 6 requirements): "Run detail shows
+evidence-backed Pass 1 results" now states a `skip` check is shown distinctly (not
+a failure); "Operator finalizes per competence" now states each control has a
+stable identity and finalizing/reopening updates the summary immediately. No
+Purpose edit needed (the delta engine handled both via `### Requirement:` blocks).
+All 6 specs validate.
+
+**Test results:** `OperatorPanelTest` **13/13** (10 existing + 3 new:
+`test_each_finalize_control_has_a_stable_distinct_key`,
+`test_finalizing_refreshes_the_parent_summary_without_reload`,
+`test_skipped_runner_check_is_not_rendered_as_a_failure`). Pint clean on the diff.
+`RepoIntakeServiceTest` **5/5 in isolation** (55s) — the 2 errors seen in a
+combined run are the documented real-runner **timeout flake** (>60s under CPU
+contention), unrelated to this diff.
+
+**Not done — flagged for the operator:** (1) a **live browser repro** of the
+original console errors was NOT performed — MySQL/Laragon was down during the fix,
+so bug #1 is verified by the compiled-key check + tests, not by reproducing the
+error end-to-end. Worth a quick live load once Laragon is up to confirm the errors
+are gone. (2) The **aesthetic pass** (flat/plain layout, weak hierarchy, the
+finalize block not emphasized, long flat scroll on real-scale runs) is a separate,
+larger scope the operator deferred — and any real aesthetic decision must PAUSE
+for operator sign-off per the UI hard rule.
+
+**State at handoff:**
+- On `main`, clean, in sync with `origin/main`. Active `openspec/changes/` holds
+  only `archive/`. **No active changes.**
+- Canonical specs: `domain-model` (12), `pass1-grading` (10), `repo-intake` (5),
+  `runner-cli` (8), `pass1-smoke-harness` (3), `operator-panel` (6).
+- `operator-panel-finalize-fixes` is DONE: applied, merged (PR #13 at `a6a54e4`),
+  archived, spec synced.
+
+**Carried-forward prerequisites (unchanged, still operator-blocked):** queue
+worker (`php artisan queue:work` or the run sticks at `pending`/`processing`);
+glm-5.2 zero-retention egress sign-off for the first live grade; swap
+`SystemSeeder`'s fixture criteria for the real référentiel before any real
+evaluation; pass a LOCAL PATH (not a URL) to intake for a gradable run.
+
+**One-liner to resume:**
+
+> Read `openspec/config.yaml` and `docs/handoff-log.md`. The log is current
+> through **Step 11 (`operator-panel-finalize-fixes`, merged PR #13 at `a6a54e4`,
+> archived)** — three panel detail-screen bugs fixed: stable finalize-child
+> `wire:key`, `Show` listens for `competence-finalized` to refresh the summary,
+> and a `skip` runner check renders neutral (not a red failure). 13/13 panel
+> tests; bugs-only, no design change. On `main`, clean, no active changes. Six
+> canonical specs unchanged in count (`operator-panel` still 6, 2 requirements
+> clarified). Still NOT done: a live browser repro of the original errors (do once
+> Laragon is up) and the deferred aesthetic pass (needs operator sign-off per the
+> UI rule). Live-run prerequisites unchanged (queue worker, glm-5.2 sign-off,
+> référentiel swap, local-path-not-URL). Hard rules + v0 sandbox-deferral stand.

@@ -84,8 +84,9 @@ the model's note SHALL be shown separately and clearly attributed as an AI note.
 When the source is not available on disk (e.g. a URL intake whose clone was
 removed), the citation SHALL still render as `file:line` with the AI note, and
 the excerpt SHALL be omitted rather than fabricated. The runner's structural
-report SHALL be shown in a collapsed summary. Transversal competences SHALL NOT
-appear as gradable rows (R3 — only technical competences are Pass 1 graded).
+report SHALL be shown in a collapsed summary; a check with a `skip` status SHALL
+be shown distinctly as neutral (not as a failure). Transversal competences SHALL
+NOT appear as gradable rows (R3 — only technical competences are Pass 1 graded).
 
 #### Scenario: Competence and criterion detail render
 - **WHEN** the operator opens a graded run's detail screen
@@ -109,6 +110,10 @@ appear as gradable rows (R3 — only technical competences are Pass 1 graded).
 - **WHEN** the run's brief includes transversal competences
 - **THEN** they do not appear as gradable competence cards on the detail screen
 
+#### Scenario: Skipped runner check is not shown as a failure
+- **WHEN** the runner structural report includes a check with a `skip` status
+- **THEN** that check is rendered distinctly as neutral (not a red failure badge)
+
 ### Requirement: Operator finalizes per competence
 The run detail screen SHALL provide, for each technical competence, a single
 finalization control that records the operator's verdict (`valide` or
@@ -116,7 +121,11 @@ finalization control that records the operator's verdict (`valide` or
 and `finalized_at` on that competence's `pass1_competence_results` row. The
 operator SHALL be able to reopen a finalized competence to change the verdict.
 Finalization SHALL be an explicit operator action; the panel SHALL NOT
-auto-finalize or pre-select a verdict from the AI rollup.
+auto-finalize or pre-select a verdict from the AI rollup. Each competence's
+finalization control SHALL have a stable identity so that finalizing one
+competence never alters another competence's control, and finalizing or
+reopening a competence SHALL update the screen's finalization summary
+immediately without requiring a manual reload.
 
 #### Scenario: Operator finalizes a competence
 - **WHEN** the operator selects `valide` (or `non valide`), optionally adds a
@@ -133,6 +142,13 @@ auto-finalize or pre-select a verdict from the AI rollup.
 - **WHEN** the operator opens a graded but not-yet-finalized competence
 - **THEN** no verdict radio is pre-selected and `finalVerdict()` for that
   competence is null
+
+#### Scenario: Finalizing one competence reflects immediately and leaves others untouched
+- **WHEN** the operator finalizes (or reopens) one competence on a run with
+  multiple technical competences
+- **THEN** the screen's finalization summary updates immediately without a manual
+  reload
+- **AND** no other competence's finalization control changes state
 
 ### Requirement: AI advice is visually non-authoritative
 The panel SHALL render AI-produced statuses (`semble valide`,
